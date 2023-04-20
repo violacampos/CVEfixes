@@ -1,0 +1,506 @@
+
+********************
+CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting') (667 samples)
+********************
+Filename: tooltip_options.js
+Message: Tooltip: Escape the title attribute so that it's treated as text and not HTML. Fixes #8861 - Tooltip: XSS vulnerability in default content.
+
+Diff: @@ -16,6 +16,20 @@ test( "content: default", function() {
+ 	deepEqual( $( "#" + element.data( "ui-tooltip-id" ) ).text(), "anchortitle" );
+ });
+ 
++test( "content: default; HTML escaping", function() {
++	expect( 2 );
++	var scriptText = "<script>$.ui.tooltip.hacked = true;</script>",
++		element = $( "#tooltipped1" );
++
++	$.ui.tooltip.hacked = false;
++	element.attr( "title", scriptText )
++		.tooltip()
++		.tooltip( "open" );
++	equal( $.ui.tooltip.hacked, false, "script did not execute" );
++	deepEqual( $( "#" + element.data( "ui-tooltip-id" ) ).text(), scriptText,
++		"correct tooltip text" );
++});
++
+ test( "content: return string", function() {
+ 	expect( 1 );
+ 	var element = $( "#tooltipped1" ).tooltip({
+
+Code after:
+	$( "#tooltipped1" ).tooltip({
+		disabled: true
+	}).tooltip( "open" );
+	equal( $( ".ui-tooltip" ).length, 0 );
+});
+
+test( "content: default", function() {
+	expect( 1 );
+	var element = $( "#tooltipped1" ).tooltip().tooltip( "open" );
+	deepEqual( $( "#" + element.data( "ui-tooltip-id" ) ).text(), "anchortitle" );
+});
+
+test( "content: default; HTML escaping", function() {
+	expect( 2 );
+	var scriptText = "<script>$.ui.tooltip.hacked = true;</script>",
+		element = $( "#tooltipped1" );
+
+	$.ui.tooltip.hacked = false;
+	element.attr( "title", scriptText )
+		.tooltip()
+		.tooltip( "open" );
+	equal( $.ui.tooltip.hacked, false, "script did not execute" );
+	deepEqual( $( "#" + element.data( "ui-tooltip-id" ) ).text(), scriptText,
+		"correct tooltip text" );
+});
+
+test( "content: return string", function() {
+	expect( 1 );
+	var element = $( "#tooltipped1" ).tooltip({
+		content: function() {
+			return "customstring";
+		}
+	}).tooltip( "open" );
+	deepEqual( $( "#" + element.data( "ui-tooltip-id" ) ).text(), "customstring" );
+});
+
+test( "content: return jQuery", function() {
+	expect( 1 );
+	var element = $( "#tooltipped1" ).tooltip({
+		content: function() {
+
+
+--------------------
+Filename: jquery.ui.tooltip.js
+Message: Tooltip: Escape the title attribute so that it's treated as text and not HTML. Fixes #8861 - Tooltip: XSS vulnerability in default content.
+
+Diff: @@ -46,7 +46,9 @@ $.widget( "ui.tooltip", {
+ 	version: "@VERSION",
+ 	options: {
+ 		content: function() {
+-			return $( this ).attr( "title" );
++			var title = $( this ).attr( "title" );
++			// Escape title, since we're going from an attribute to raw HTML
++			return $( "<a>" ).text( title ).html();
+ 		},
+ 		hide: true,
+ 		// Disabled elements have inconsistent behavior across browsers (#8661)
+
+Code after:
+	describedby = $.trim( describedby.join( " " ) );
+	if ( describedby ) {
+		elem.attr( "aria-describedby", describedby );
+	} else {
+		elem.removeAttr( "aria-describedby" );
+	}
+}
+
+$.widget( "ui.tooltip", {
+	version: "@VERSION",
+	options: {
+		content: function() {
+			var title = $( this ).attr( "title" );
+			// Escape title, since we're going from an attribute to raw HTML
+			return $( "<a>" ).text( title ).html();
+		},
+		hide: true,
+		// Disabled elements have inconsistent behavior across browsers (#8661)
+		items: "[title]:not([disabled])",
+		position: {
+			my: "left top+15",
+			at: "left bottom",
+			collision: "flipfit flip"
+		},
+		show: true,
+		tooltipClass: null,
+		track: false,
+
+		// callbacks
+
+
+--------------------
+Filename: common.js
+Message: triggers, routines, events : escape drop sql
+
+Diff: @@ -318,7 +318,7 @@ $(document).ready(function () {
+         /**
+          * @var question    String containing the question to be asked for confirmation
+          */
+-        var question = $('<div/>').text($curr_row.children('td').children('.drop_sql').html());
++        var question = $('<div/>').text($curr_row.children('td').children('.drop_sql').text());
+         // We ask for confirmation first here, before submitting the ajax request
+         $(this).PMA_confirm(question, $(this).attr('href'), function (url) {
+             /**
+
+Code after:
+    /**
+     * Attach Ajax event handlers for Drop functionality of Routines, Triggers and Events.
+     */
+    $('a.ajax_drop_anchor').live('click', function (event) {
+        event.preventDefault();
+        /**
+         * @var $curr_row    Object containing reference to the current row
+         */
+        var $curr_row = $(this).parents('tr');
+        /**
+         * @var question    String containing the question to be asked for confirmation
+         */
+        var question = $('<div/>').text($curr_row.children('td').children('.drop_sql').text());
+        // We ask for confirmation first here, before submitting the ajax request
+        $(this).PMA_confirm(question, $(this).attr('href'), function (url) {
+            /**
+             * @var    $msg    jQuery object containing the reference to
+             *                 the AJAX message shown to the user.
+             */
+            var $msg = PMA_ajaxShowMessage(PMA_messages['strProcessingRequest']);
+            $.get(url, {'is_js_confirmed': 1, 'ajax_request': true}, function (data) {
+                if (data.success === true) {
+                    /**
+                     * @var $table    Object containing reference to the main list of elements.
+                     */
+                    var $table = $curr_row.parent();
+                    // Check how many rows will be left after we remove
+
+
+--------------------
+Filename: tbl_structure.js
+Message: bug #4492 [security] XSS in AJAX confirmation messages
+
+Signed-off-by: Marc Delisle <marc@infomarc.info>
+
+Diff: @@ -198,6 +198,7 @@ AJAX.registerOnload('tbl_structure.js', function () {
+          * @var curr_column_name    String containing name of the field referred to by {@link curr_row}
+          */
+         var curr_column_name = $curr_row.children('th').children('label').text();
++        curr_column_name = escapeHtml(curr_column_name);
+         /**
+          * @var $after_field_item    Corresponding entry in the 'After' field.
+          */
+
+Code after:
+        /**
+         * @var curr_table_name String containing the name of the current table
+         */
+        var curr_table_name = $(this).closest('form').find('input[name=table]').val();
+        /**
+         * @var curr_row    Object reference to the currently selected row (i.e. field in the table)
+         */
+        var $curr_row = $(this).parents('tr');
+        /**
+         * @var curr_column_name    String containing name of the field referred to by {@link curr_row}
+         */
+        var curr_column_name = $curr_row.children('th').children('label').text();
+        curr_column_name = escapeHtml(curr_column_name);
+        /**
+         * @var $after_field_item    Corresponding entry in the 'After' field.
+         */
+        var $after_field_item = $("select[name='after_field'] option[value='" + curr_column_name + "']");
+        /**
+         * @var question    String containing the question to be asked for confirmation
+         */
+        var question = $.sprintf(PMA_messages.strDoYouReally, 'ALTER TABLE `' + escapeHtml(curr_table_name) + '` DROP `' + escapeHtml(curr_column_name) + '`;');
+        $(this).PMA_confirm(question, $(this).attr('href'), function (url) {
+            var $msg = PMA_ajaxShowMessage(PMA_messages.strDroppingColumn, false);
+            $.get(url, {'is_js_confirmed' : 1, 'ajax_request' : true, 'ajax_page_request' : true}, function (data) {
+                if (data.success === true) {
+                    PMA_ajaxRemoveMessage($msg);
+                    if ($('#result_query').length) {
+
+
+--------------------
+Filename: functions.js
+Message: bug #4505 [security] XSS in view operations page
+
+Signed-off-by: Marc Delisle <marc@infomarc.info>
+
+Diff: @@ -3585,7 +3585,7 @@ AJAX.registerOnload('functions.js', function () {
+         var question = PMA_messages.strDropTableStrongWarning + ' ';
+         question += $.sprintf(
+             PMA_messages.strDoYouReally,
+-            'DROP VIEW ' + PMA_commonParams.get('table')
++            'DROP VIEW ' + escapeHtml(PMA_commonParams.get('table'))
+         );
+ 
+         $(this).PMA_confirm(question, $(this).attr('href'), function (url) {
+
+Code after:
+            }); // end $.get()
+        }); // end $.PMA_confirm()
+    }); //end of Drop Table Ajax action
+
+    $("#drop_view_anchor.ajax").live('click', function (event) {
+        event.preventDefault();
+        /**
+         * @var question    String containing the question to be asked for confirmation
+         */
+        var question = PMA_messages.strDropTableStrongWarning + ' ';
+        question += $.sprintf(
+            PMA_messages.strDoYouReally,
+            'DROP VIEW ' + escapeHtml(PMA_commonParams.get('table'))
+        );
+
+        $(this).PMA_confirm(question, $(this).attr('href'), function (url) {
+
+            var $msgbox = PMA_ajaxShowMessage(PMA_messages.strProcessingRequest);
+            $.get(url, {'is_js_confirmed': '1', 'ajax_request': true}, function (data) {
+                if (data.success === true) {
+                    PMA_ajaxRemoveMessage($msgbox);
+                    // Table deleted successfully, refresh both the frames
+                    PMA_reloadNavigation();
+                    PMA_commonParams.set('table', '');
+                    PMA_commonActions.refreshMain(
+                        PMA_commonParams.get('opendb_url'),
+                        function () {
+
+
+--------------------
+Filename: sql.js
+Message: bug #4501 [security] XSS in table browse page
+
+Signed-off-by: Marc Delisle <marc@infomarc.info>
+
+Diff: @@ -119,7 +119,7 @@ AJAX.registerOnload('sql.js', function () {
+     // Delete row from SQL results
+     $('a.delete_row.ajax').live('click', function (e) {
+         e.preventDefault();
+-        var question = $.sprintf(PMA_messages.strDoYouReally, $(this).closest('td').find('div').text());
++        var question = $.sprintf(PMA_messages.strDoYouReally, escapeHtml($(this).closest('td').find('div').text()));
+         var $link = $(this);
+         $link.PMA_confirm(question, $link.attr('href'), function (url) {
+             $msgbox = PMA_ajaxShowMessage();
+
+Code after:
+ * <li>Change table according to display options</li>
+ * <li>Grid editing of data</li>
+ * <li>Saving a bookmark</li>
+ * </ul>
+ *
+ * @name        document.ready
+ * @memberOf    jQuery
+ */
+AJAX.registerOnload('sql.js', function () {
+    // Delete row from SQL results
+    $('a.delete_row.ajax').live('click', function (e) {
+        e.preventDefault();
+        var question = $.sprintf(PMA_messages.strDoYouReally, escapeHtml($(this).closest('td').find('div').text()));
+        var $link = $(this);
+        $link.PMA_confirm(question, $link.attr('href'), function (url) {
+            $msgbox = PMA_ajaxShowMessage();
+            $.get(url, {'ajax_request': true, 'is_js_confirmed': true}, function (data) {
+                if (data.success) {
+                    PMA_ajaxShowMessage(data.message);
+                    $link.closest('tr').remove();
+                } else {
+                    PMA_ajaxShowMessage(data.error, false);
+                }
+            });
+        });
+    });
+
+
+
+--------------------
+Filename: functions.js
+Message: bug #4502 [security] Self-XSS in enum value editor
+
+Signed-off-by: Marc Delisle <marc@infomarc.info>
+
+Diff: @@ -2692,7 +2692,7 @@ AJAX.registerOnload('functions.js', function () {
+         } else {
+             title = PMA_messages.enum_columnVals.replace(
+                 /%s/,
+-                '"' + decodeURIComponent(colname) + '"'
++                '"' + escapeHtml(decodeURIComponent(colname)) + '"'
+             );
+         }
+         // Get the values as a string
+
+Code after:
+AJAX.registerOnload('functions.js', function () {
+    $("a.open_enum_editor").live('click', function () {
+        // Get the name of the column that is being edited
+        var colname = $(this).closest('tr').find('input:first').val();
+        var title;
+        var i;
+        // And use it to make up a title for the page
+        if (colname.length < 1) {
+            title = PMA_messages.enum_newColumnVals;
+        } else {
+            title = PMA_messages.enum_columnVals.replace(
+                /%s/,
+                '"' + escapeHtml(decodeURIComponent(colname)) + '"'
+            );
+        }
+        // Get the values as a string
+        var inputstring = $(this)
+            .closest('td')
+            .find("input")
+            .val();
+        // Escape html entities
+        inputstring = $('<div/>')
+            .text(inputstring)
+            .html();
+        // Parse the values, escaping quotes and
+        // slashes on the fly, into an array
+        var values = [];
+
+
+--------------------
+Filename: server_status_monitor.js
+Message: bug #4503 [security] Self-XSSes in monitor
+
+Signed-off-by: Marc Delisle <marc@infomarc.info>
+
+Diff: @@ -908,7 +908,7 @@ AJAX.registerOnload('server_status_monitor.js', function () {
+             label: $('#variableInput').val().replace(/_/g, " ")
+         };
+         newChart.series.push(newSeries);
+-        $('#seriesPreview').append('- ' + newSeries.label + str + '<br/>');
++        $('#seriesPreview').append('- ' + escapeHtml(newSeries.label + str) + '<br/>');
+         newChart.nodes.push(serie);
+         $('#variableInput').val('');
+         $('input[name="differentialValue"]').prop('checked', true);
+
+Code after:
+        if ($('input[name="useUnit"]').prop('checked')) {
+            serie.unit = $('input[name="valueUnit"]').val();
+        }
+
+        var str = serie.display == 'differential' ? ', ' + PMA_messages.strDifferential : '';
+        str += serie.valueDivisor ? (', ' + $.sprintf(PMA_messages.strDividedBy, serie.valueDivisor)) : '';
+        str += serie.unit ? (', ' + PMA_messages.strUnit + ': ' + serie.unit) : '';
+
+        var newSeries = {
+            label: $('#variableInput').val().replace(/_/g, " ")
+        };
+        newChart.series.push(newSeries);
+        $('#seriesPreview').append('- ' + escapeHtml(newSeries.label + str) + '<br/>');
+        newChart.nodes.push(serie);
+        $('#variableInput').val('');
+        $('input[name="differentialValue"]').prop('checked', true);
+        $('input[name="useDivisor"]').prop('checked', false);
+        $('input[name="useUnit"]').prop('checked', false);
+        $('input[name="useDivisor"]').trigger('change');
+        $('input[name="useUnit"]').trigger('change');
+        $('select[name="varChartList"]').get(0).selectedIndex = 0;
+
+        $('#clearSeriesLink').show();
+
+        return false;
+    });
+
+
+
+--------------------
+Filename: tbl_chart.js
+Message: bug #4504 [security] Self-XSS in query charts
+
+Signed-off-by: Marc Delisle <marc@infomarc.info>
+
+Diff: @@ -47,7 +47,7 @@ function PMA_queryChart(data, columnNames, settings) {
+         },
+         axes : {
+             xaxis : {
+-                label : settings.xaxisLabel
++                label : escapeHtml(settings.xaxisLabel)
+             },
+             yaxis : {
+                 label : settings.yaxisLabel
+
+Code after:
+        grid : {
+            drawBorder : false,
+            shadow : false,
+            background : 'rgba(0,0,0,0)'
+        },
+        legend : {
+            show : true,
+            placement : 'outsideGrid',
+            location : 'e'
+        },
+        axes : {
+            xaxis : {
+                label : escapeHtml(settings.xaxisLabel)
+            },
+            yaxis : {
+                label : settings.yaxisLabel
+            }
+        },
+        stackSeries : settings.stackSeries
+    };
+
+    // create the chart
+    var factory = new JQPlotChartFactory();
+    var chart = factory.createChart(settings.type, "querychart");
+
+    // create the data table and add columns
+    var dataTable = new DataTable();
+
+
+--------------------
+Filename: ajax.js
+Message: bug #4530 [security] DOM based XSS that results to a CSRF that creates a ROOT account in certain conditions
+
+Signed-off-by: Marc Delisle <marc@infomarc.info>
+
+Diff: @@ -783,9 +783,16 @@ AJAX.setUrlHash = (function (jQuery, window) {
+     if (window.location.hash.substring(0, 8) == '#PMAURL-') {
+         // We have a valid hash, let's redirect the user
+         // to the page that it's pointing to
+-        window.location = window.location.hash.substring(
+-            window.location.hash.indexOf(':') + 1
+-        );
++        var colon_position = window.location.hash.indexOf(':');
++        var questionmark_position = window.location.hash.indexOf('?');
++        if (colon_position != -1 && questionmark_position != -1 && colon_position < questionmark_position) {
++            var hash_url = window.location.hash.substring(colon_position + 1, questionmark_position);
++            if (PMA_gotoWhitelist.indexOf(hash_url) != -1) {
++                window.location = window.location.hash.substring(
++                    colon_position + 1
++                );
++            }
++        }
+     } else {
+         // We don't have a valid hash, so we'll set it up
+         // when the page finishes loading
+
+Code after:
+            window.location.hash = "PMAURL-" + index + ":" + hash;
+            resetFavicon();
+        } else {
+            savedHash = "PMAURL-" + index + ":" + hash;
+        }
+    }
+    /**
+     * Start initialisation
+     */
+    if (window.location.hash.substring(0, 8) == '#PMAURL-') {
+        // We have a valid hash, let's redirect the user
+        // to the page that it's pointing to
+        var colon_position = window.location.hash.indexOf(':');
+        var questionmark_position = window.location.hash.indexOf('?');
+        if (colon_position != -1 && questionmark_position != -1 && colon_position < questionmark_position) {
+            var hash_url = window.location.hash.substring(colon_position + 1, questionmark_position);
+            if (PMA_gotoWhitelist.indexOf(hash_url) != -1) {
+                window.location = window.location.hash.substring(
+                    colon_position + 1
+                );
+            }
+        }
+    } else {
+        // We don't have a valid hash, so we'll set it up
+        // when the page finishes loading
+        jQuery(function () {
+            /* Check if we should set URL */
+            if (savedHash !== "") {
+                window.location.hash = savedHash;
+                savedHash = "";
+                resetFavicon();
+            }
+            // Indicate that we're done initialising
+            ready = true;
+        });
+    }
+
+
+--------------------

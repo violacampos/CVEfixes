@@ -1,0 +1,3919 @@
+
+********************
+CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting') (1871 samples)
+********************
+Filename: class.entrycontroller.php
+Message: Fixed XSS vulnerability where filename could contain abitrary code to execute on the client side.
+
+Diff: @@ -279,7 +279,7 @@ class EntryController extends Gdn_Controller {
+                   
+                   // This resets vanilla's internal "where am I" to the homepage. Needed.
+                   Gdn::Request()->WithRoute('DefaultController');
+-                  $this->SelfUrl = Gdn::Request()->Path();
++                  $this->SelfUrl = Url('');//Gdn::Request()->Path();
+                   
+                   $this->View = 'syncfailed';
+                   $this->ProviderSite = $Authenticator->GetProviderUrl();
+
+Code after:
+                  
+               } else {
+                  
+                  // Set the memory cookie to allow signinloopback to shortcircuit remote query.
+                  $CookiePayload = array(
+                     'Sync'   => 'Failed'
+                  );
+                  $SerializedCookiePayload = Gdn_Format::Serialize($CookiePayload);
+                  $Authenticator->Remember($UserInfo['ConsumerKey'], $SerializedCookiePayload);
+                  
+                  // This resets vanilla's internal "where am I" to the homepage. Needed.
+                  Gdn::Request()->WithRoute('DefaultController');
+                  $this->SelfUrl = Url('');//Gdn::Request()->Path();
+                  
+                  $this->View = 'syncfailed';
+                  $this->ProviderSite = $Authenticator->GetProviderUrl();
+                  $this->Render();
+               }
+               
+            }
+         break;
+      
+      }
+   }
+   
+   public function SyncScreen($Authenticator, $UserInfo, $Payload) {
+      $this->AddJsFile('entry.js');
+
+
+--------------------
+Filename: class.dispatcher.php
+Message: Fixed XSS vulnerability where filename could contain abitrary code to execute on the client side.
+
+Diff: @@ -359,7 +359,7 @@ class Gdn_Dispatcher extends Gdn_Pluggable {
+       $this->_ControllerName = '';
+       $this->_ControllerMethod = 'index';
+       $this->_ControllerMethodArgs = array();
+-      $this->Request = $Request->Path();
++      $this->Request = Url('');//$Request->Path();
+ 
+       $PathAndQuery = $Request->PathAndQuery();
+       $MatchRoute = Gdn::Router()->MatchRoute($PathAndQuery);
+
+Code after:
+      // /controller/method/argn
+      // /application/controller/argn
+      // /controller/argn
+      // /controller
+
+
+      // Clear the slate
+      $this->_ApplicationFolder = '';
+      $this->_ControllerFolder = '';
+      $this->_ControllerName = '';
+      $this->_ControllerMethod = 'index';
+      $this->_ControllerMethodArgs = array();
+      $this->Request = Url('');//$Request->Path();
+
+      $PathAndQuery = $Request->PathAndQuery();
+      $MatchRoute = Gdn::Router()->MatchRoute($PathAndQuery);
+
+      // We have a route. Take action.
+      if ($MatchRoute !== FALSE) {
+         switch ($MatchRoute['Type']) {
+            case 'Internal':
+               $Request->PathAndQuery($MatchRoute['FinalDestination']);
+               $this->Request = $MatchRoute['FinalDestination'];
+               break;
+
+            case 'Temporary':
+               Header( "HTTP/1.1 302 Moved Temporarily" );
+
+
+--------------------
+Filename: string_api.php
+Message: Fix URL redirection issue in login_page.php
+
+The fix for issue #17648 failed to correct all cases of redirection.
+
+Alejo Popovici discovered that the regex checking for URLs pointing to
+other domains considered an URL with a single '/' as local, allowing
+redirection e.g. to http:/google.com on certain browsers.
+
+Fixes #17997 (CVE-2015-1042)
+
+Diff: @@ -268,7 +268,7 @@ function string_sanitize_url( $p_url, $p_return_absolute = false ) {
+ 
+ 	# Check for URL's pointing to other domains
+ 	if( 0 == $t_type || empty( $t_matches['script'] ) ||
+-		3 == $t_type && preg_match( '@(?:[^:]*)?://@', $t_url ) > 0 ) {
++		3 == $t_type && preg_match( '@(?:[^:]*)?:/*@', $t_url ) > 0 ) {
+ 
+ 		return ( $p_return_absolute ? $t_path . '/' : '' ) . 'index.php';
+ 	}
+
+Code after:
+	if( preg_match( '@^(?P<path>' . preg_quote( $t_path, '@' ) . ')' . $t_pattern . '$@', $t_url, $t_matches ) ) {
+		$t_type = 1;
+	} else if( !empty( $t_short_path )
+			&& preg_match( '@^(?P<path>' . preg_quote( $t_short_path, '@' ) . ')' . $t_pattern . '$@', $t_url, $t_matches )
+	) {
+		$t_type = 2;
+	} else if( preg_match( '@^(?P<path>)' . $t_pattern . '$@', $t_url, $t_matches ) ) {
+		$t_type = 3;
+	}
+
+	# Check for URL's pointing to other domains
+	if( 0 == $t_type || empty( $t_matches['script'] ) ||
+		3 == $t_type && preg_match( '@(?:[^:]*)?:/*@', $t_url ) > 0 ) {
+
+		return ( $p_return_absolute ? $t_path . '/' : '' ) . 'index.php';
+	}
+
+	# Start extracting regex matches
+	$t_script = $t_matches['script'];
+	$t_script_path = $t_matches['path'];
+
+	# Clean/encode query params
+	$t_query = '';
+	if( isset( $t_matches['query'] ) ) {
+		$t_pairs = array();
+		parse_str( html_entity_decode( $t_matches['query'] ), $t_pairs );
+
+
+
+--------------------
+Filename: filter_form_api.php
+Message: Fix XSS in filter_form_draw_inputs() (CVE-2018-13055)
+
+Ömer Çıtak, Security Researcher at Netsparker, reported this
+vulnerability, allowing remote attackers to inject arbitrary code
+(if CSP settings permit it) through a crafted PATH_INFO on
+view_filters_page.php.
+
+Prevent the attack by sanitizing the output of $_SERVER['PHP_SELF']
+before display.
+
+Fixes #24580
+
+Diff: @@ -2394,6 +2394,7 @@ function filter_form_draw_inputs( $p_filter, $p_for_screen = true, $p_static = f
+ 
+ 	if( null === $p_static_fallback_page ) {
+ 		$p_static_fallback_page = $_SERVER['PHP_SELF'];
++		$p_static_fallback_page = string_sanitize_url( $_SERVER['PHP_SELF'] );
+ 	}
+ 	$t_filters_url = $p_static_fallback_page;
+ 	$t_get_params = $_GET;
+
+Code after:
+			# If all_projects, the filter can be used at any project, select the current project id
+			$t_project_id = helper_get_current_project();
+		} else if( $t_project_id < 0 ) {
+			# If filter is an unnamed filter, project id is stored as negative value.
+			$t_project_id = -1 * $t_project_id;
+		}
+	} else {
+		$t_project_id = helper_get_current_project();
+	}
+
+	if( null === $p_static_fallback_page ) {
+		$p_static_fallback_page = $_SERVER['PHP_SELF'];
+		$p_static_fallback_page = string_sanitize_url( $_SERVER['PHP_SELF'] );
+	}
+	$t_filters_url = $p_static_fallback_page;
+	$t_get_params = $_GET;
+	$t_get_params['for_screen'] = $p_for_screen;
+	$t_get_params['static'] = ON;
+	$t_get_params['view_type'] = ( FILTER_VIEW_TYPE_ADVANCED == $t_view_type )
+		? FILTER_VIEW_TYPE_ADVANCED
+		: FILTER_VIEW_TYPE_SIMPLE;
+	$t_filters_url .= '?' . http_build_query( $t_get_params );
+
+	$t_show_product_version =  version_should_show_product_version( $t_project_id );
+	$t_show_build = $t_show_product_version && ( config_get( 'enable_product_build' ) == ON );
+
+	# overload handler_id setting if user isn't supposed to see them (ref #6189)
+
+
+--------------------
+Filename: manage_filter_edit_page.php
+Message: Fix XSS on filter edit page (CVE-2018-14504)
+
+Teun Beijers reported a cross-site scripting (XSS) vulnerability in
+the Edit Filter page which allows execution of arbitrary code
+(if CSP settings permit it) when displaying a filter with a crafted
+name.
+
+Prevent the attack by sanitizing the filter name before display.
+
+Fixes #24608
+
+Diff: @@ -124,7 +124,7 @@ $t_filter_project_id = filter_get_field( $f_filter_id, 'project_id' );
+ 						<div class="form-inline">
+ 							<label>
+ 								<?php echo lang_get( 'query_name' ) ?>&nbsp;
+-								<input type="text" size="25" name="filter_name" maxlength="64" value="<?php echo filter_get_field( $f_filter_id, 'name' ) ?>">
++								<input type="text" size="25" name="filter_name" maxlength="64" value="<?php echo string_display_line( filter_get_field( $f_filter_id, 'name' ) ) ?>">
+ 							</label>
+ 						</div>
+ 					</div>
+
+Code after:
+			</div>
+
+		</div>
+
+		<div class="widget-body">
+			<div class="widget-main no-padding">
+
+				<div class="widget-toolbox padding-8 clearfix">
+					<div class="btn-toolbar pull-left">
+						<div class="form-inline">
+							<label>
+								<?php echo lang_get( 'query_name' ) ?>&nbsp;
+								<input type="text" size="25" name="filter_name" maxlength="64" value="<?php echo string_display_line( filter_get_field( $f_filter_id, 'name' ) ) ?>">
+							</label>
+						</div>
+					</div>
+				</div>
+
+				<div class="table-responsive">
+					<?php
+					$t_for_screen = true;
+					$t_static = gpc_get_bool( 'static', false );
+					filter_form_draw_inputs( $t_filter, $t_for_screen, $t_static );
+					?>
+				</div>
+
+				<div class="widget-toolbox padding-8 clearfix">
+
+
+--------------------
+Filename: IssueAttachmentTimelineEvent.class.php
+Message: Fix XSS on timeline (CVE-2019-15074)
+
+Kamran Saifullah reported a stored cross-site scripting (XSS)
+vulnerability in Timeline, allowing execution of arbitrary code (if CSP
+settings permit it) after uploading an attachment with a crafted
+filename. The code is executed for any user having visibility to the
+issue, whenever My View Page is displayed.
+
+Prevent the attack by sanitizing the filename before display.
+
+Fixes #25995
+
+Diff: @@ -73,7 +73,7 @@ class IssueAttachmentTimelineEvent extends TimelineEvent {
+ 			. sprintf( lang_get( $t_string ),
+ 				prepare_user_name( $this->user_id ),
+ 				$t_bug_link,
+-				$this->filename
++				string_html_specialchars( $this->filename )
+ 			)
+ 			. '</div>';
+ 		$t_html .= $this->html_end();
+
+Code after:
+				break;
+			default:
+				throw new ServiceException( 'Unknown Event Type', ERROR_GENERIC );
+		}
+
+		$t_bug_link = string_get_bug_view_link( $this->issue_id );
+
+		$t_html = $this->html_start( 'fa-file-o' );
+		$t_html .= '<div class="action">'
+			. sprintf( lang_get( $t_string ),
+				prepare_user_name( $this->user_id ),
+				$t_bug_link,
+				string_html_specialchars( $this->filename )
+			)
+			. '</div>';
+		$t_html .= $this->html_end();
+
+		return $t_html;
+	}
+}
+
+
+--------------------
+Filename: proj_doc_edit_page.php
+Message: Fix XSS on project documentation
+
+Vulnerability in deprecated project documentation functionality
+($g_enable_project_documentation), allowing execution of arbitrary
+code (if CSP settings permit it) after uploading an attachment with a
+crafted filename.
+
+Prevent the attack by sanitizing the filename before display.
+
+Fixes #26078
+
+Diff: @@ -122,7 +122,7 @@ print_doc_menu();
+ 			$t_href = '<a href="file_download.php?file_id='.$v_id.'&amp;type=doc">';
+ 			echo $t_href;
+ 			print_file_icon( $v_filename );
+-			echo '</a>&#160;' . $t_href . file_get_display_name( $v_filename ) . '</a>';
++			echo '</a>&#160;' . $t_href . string_html_specialchars( file_get_display_name( $v_filename ) ) . '</a>';
+ 		?>
+ 	</td>
+ </tr>
+
+Code after:
+		<textarea class="form-control" name="description" cols="60" rows="7"><?php echo $v_description ?></textarea>
+	</td>
+</tr>
+<tr>
+	<th class="category">
+		<?php echo lang_get( 'filename' ) ?>
+	</th>
+	<td>
+		<?php
+			$t_href = '<a href="file_download.php?file_id='.$v_id.'&amp;type=doc">';
+			echo $t_href;
+			print_file_icon( $v_filename );
+			echo '</a>&#160;' . $t_href . string_html_specialchars( file_get_display_name( $v_filename ) ) . '</a>';
+		?>
+	</td>
+</tr>
+<tr>
+	<td class="category">
+		<?php echo lang_get( 'select_file' ); ?>
+		<br />
+		<?php print_max_filesize( $t_max_file_size ); ?>
+	</td>
+	<td>
+		<input type="hidden" name="max_file_size" value="<?php echo $t_max_file_size ?>" />
+		<input name="file" type="file" size="70" />
+	</td>
+<tr>
+
+
+--------------------
+Filename: cfdef_standard.php
+Message: Fix XSS in Custom Field regex pattern validation
+
+Improper escaping of the custom field definition's Regular Expression
+allowed an attacker to inject HTML into the page (CVE-2020-25288).
+
+Credits to d3vpoo1 (https://gitlab.com/jrckmcsb) for the finding.
+
+Fixes #27275
+
+Diff: @@ -467,7 +467,7 @@ function cfdef_input_textbox( array $p_field_def, $p_custom_field_value, $p_requ
+ 		if( substr( $t_cf_regex, -1 ) != '$' ) {
+ 			$t_cf_regex .= '.*';
+ 		}
+-		echo ' pattern="' . $t_cf_regex . '"';
++		echo ' pattern="' . string_attribute( $t_cf_regex ) . '"';
+ 	}
+ 	echo ' value="' . string_attribute( $p_custom_field_value ) .'" />';
+ }
+
+Code after:
+	}
+	if( !empty( $p_field_def['valid_regexp'] ) ) {
+		# the custom field regex is evaluated with preg_match and looks for a partial match in the string
+		# however, the html property is matched for the whole string.
+		# unless we have explicit start and end tokens, adapt the html regex to allow a substring match.
+		$t_cf_regex = $p_field_def['valid_regexp'];
+		if( substr( $t_cf_regex, 0, 1 ) != '^' ) {
+			$t_cf_regex = '.*' . $t_cf_regex;
+		}
+		if( substr( $t_cf_regex, -1 ) != '$' ) {
+			$t_cf_regex .= '.*';
+		}
+		echo ' pattern="' . string_attribute( $t_cf_regex ) . '"';
+	}
+	echo ' value="' . string_attribute( $p_custom_field_value ) .'" />';
+}
+
+/**
+ * print_custom_field_input
+ * @param array $p_field_def          Custom field definition.
+ * @param mixed $p_custom_field_value Custom field value.
+ * @param string $p_required          The "required" attribute to add to the field
+ * @return void
+ */
+function cfdef_input_textarea( array $p_field_def, $p_custom_field_value, $p_required = '' ) {
+	echo '<textarea class="form-control" ', helper_get_tab_index(), ' id="custom_field_' . $p_field_def['id']
+			, '" name="custom_field_', $p_field_def['id'], '"', $p_required;
+
+
+--------------------
+Filename: bug_actiongroup_page.php
+Message: Fix XSS in bug_actiongroup_page.php
+
+Improper escaping of the custom field's name allowed an attacker to
+inject HTML into the page.
+
+Credits to d3vpoo1 (https://gitlab.com/jrckmcsb) for the finding.
+
+Fixes #27304
+
+Diff: @@ -225,7 +225,9 @@ switch( $f_action ) {
+ 		break;
+ 	case 'CUSTOM' :
+ 		$t_custom_field_def = custom_field_get_definition( $t_custom_field_id );
+-		$t_question_title = sprintf( lang_get( 'actiongroup_menu_update_field' ), lang_get_defaulted( $t_custom_field_def['name'] ) );
++		$t_question_title = sprintf( lang_get( 'actiongroup_menu_update_field' ),
++			string_attribute( lang_get_defaulted( $t_custom_field_def['name'] ) )
++		);
+ 		$t_button_title = $t_question_title;
+ 		$t_form = 'custom_field_' . $t_custom_field_id;
+ 		$t_event_params['custom_field_id'] = $t_custom_field_id;
+
+Code after:
+	case 'UP_TARGET_VERSION':
+		$t_question_title		= lang_get( 'target_version_bugs_conf_msg' );
+		$t_button_title			= lang_get( 'target_version_group_bugs_button' );
+		$t_form					= 'target_version';
+		break;
+	case 'UP_DUE_DATE':
+		$t_question_title		= lang_get( 'due_date_bugs_conf_msg' );
+		$t_button_title			= lang_get( 'due_date_group_bugs_button' );
+		$t_form					= 'due_date';
+		break;
+	case 'CUSTOM' :
+		$t_custom_field_def = custom_field_get_definition( $t_custom_field_id );
+		$t_question_title = sprintf( lang_get( 'actiongroup_menu_update_field' ),
+			string_attribute( lang_get_defaulted( $t_custom_field_def['name'] ) )
+		);
+		$t_button_title = $t_question_title;
+		$t_form = 'custom_field_' . $t_custom_field_id;
+		$t_event_params['custom_field_id'] = $t_custom_field_id;
+		break;
+	default:
+		trigger_error( ERROR_GENERIC, ERROR );
+}
+$t_event_params['has_bugnote'] = $t_bugnote;
+
+bug_group_action_print_top();
+?>
+
+<div class="col-md-12 col-xs-12">
+<?php
+
+
+--------------------
+Filename: html_api.php
+Message: Fix XSS in custom fields management
+
+Kacper Szurek (http://security.szurek.pl/) discovered an XSS
+vulnerability in Custom fields management pages, caused by unescaped
+output of 'return URL' GPC parameter. His report describes two ways to
+exploit this issue:
+
+1. using 'accesskey' inside hidden input field (see [1]) reflects XSS to
+   the administrator in manage_custom_field_edit_page.php when the
+   keyboard shortcut is actioned
+2. using 'javascript:' URI scheme executes the code when the user clicks
+   the [Proceed] link on manage_custom_field_update.php after updating
+   a custom field
+
+This commit fixes both attack vectors:
+
+- properly escape the return URL prior to printing it on the hidden form
+  field
+- let html_operation_successful() sanitize the URL before displaying
+  it, just like html_meta_redirect() does. In this case, if the
+  string contains an URI scheme, it will be replaced by 'index.php'
+
+[1] http://blog.portswigger.net/2015/11/xss-in-hidden-input-fields.html
+
+Fixes #20956
+
+Diff: @@ -647,7 +647,7 @@ function html_operation_successful( $p_redirect_url, $p_message = '' ) {
+ 	}
+ 
+ 	echo lang_get( 'operation_successful' ).'<br />';
+-	print_bracket_link( $p_redirect_url, lang_get( 'proceed' ) );
++	print_bracket_link( string_sanitize_url( $p_redirect_url ), lang_get( 'proceed' ) );
+ 	echo '</div>';
+ }
+ 
+
+Code after:
+ * @param string $p_redirect_url The url to redirect to.
+ * @param string $p_message      Message to display to the user.
+ * @return void
+ */
+function html_operation_successful( $p_redirect_url, $p_message = '' ) {
+	echo '<div class="success-msg">';
+
+	if( !is_blank( $p_message ) ) {
+		echo $p_message . '<br />';
+	}
+
+	echo lang_get( 'operation_successful' ).'<br />';
+	print_bracket_link( string_sanitize_url( $p_redirect_url ), lang_get( 'proceed' ) );
+	echo '</div>';
+}
+
+/**
+ * Checks if the current page load was triggered by auto-refresh or real activity
+ * @return bool true: auto-refresh, false: triggered by user.
+ */
+function html_is_auto_refresh() {
+	return gpc_get_bool( 'refresh' );
+}
+
+/**
+ * (13) Print the page footer information
+ * @return void
+
+
+--------------------
+
+********************
+CWE-89: Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection') (626 samples)
+********************
+Filename: card.php
+Message: FIX BlindBoolean SQL injection reported by Christian Weiler
+<sak1.s3curity@gmail.com>
+
+Diff: @@ -34,8 +34,8 @@ $action = GETPOST('action', 'alpha');
+ $cancel = GETPOST('cancel', 'alpha');
+ $backtopage = GETPOST('backtopage', 'alpha');
+ 
+-$codeventil = GETPOST('codeventil');
+-$id = GETPOST('id');
++$codeventil = GETPOST('codeventil', 'int');
++$id = GETPOST('id', 'int');
+ 
+ // Security check
+ if ($user->socid > 0)
+
+Code after:
+require '../../main.inc.php';
+
+require_once DOL_DOCUMENT_ROOT.'/compta/facture/class/facture.class.php';
+require_once DOL_DOCUMENT_ROOT.'/core/class/html.formaccounting.class.php';
+
+// Load translation files required by the page
+$langs->loadLangs(array("bills", "accountancy"));
+
+$action = GETPOST('action', 'alpha');
+$cancel = GETPOST('cancel', 'alpha');
+$backtopage = GETPOST('backtopage', 'alpha');
+
+$codeventil = GETPOST('codeventil', 'int');
+$id = GETPOST('id', 'int');
+
+// Security check
+if ($user->socid > 0)
+	accessforbidden();
+
+
+/*
+ * Actions
+ */
+
+if ($action == 'ventil' && $user->rights->accounting->bind->write)
+{
+	if (!$cancel)
+	{
+
+
+--------------------
+Filename: card.php
+Message: FIX BlindBoolean SQL injection reported by Christian Weiler
+<sak1.s3curity@gmail.com>
+
+Diff: @@ -38,8 +38,8 @@ $action = GETPOST('action', 'alpha');
+ $cancel = GETPOST('cancel', 'alpha');
+ $backtopage = GETPOST('backtopage', 'alpha');
+ 
+-$codeventil = GETPOST('codeventil');
+-$id = GETPOST('id');
++$codeventil = GETPOST('codeventil', 'int');
++$id = GETPOST('id', 'int');
+ 
+ // Security check
+ if ($user->socid > 0)
+
+Code after:
+require '../../main.inc.php';
+
+require_once DOL_DOCUMENT_ROOT.'/expensereport/class/expensereport.class.php';
+require_once DOL_DOCUMENT_ROOT.'/core/class/html.formaccounting.class.php';
+
+// Load translation files required by the page
+$langs->loadLangs(array("bills", "accountancy", "trips"));
+
+$action = GETPOST('action', 'alpha');
+$cancel = GETPOST('cancel', 'alpha');
+$backtopage = GETPOST('backtopage', 'alpha');
+
+$codeventil = GETPOST('codeventil', 'int');
+$id = GETPOST('id', 'int');
+
+// Security check
+if ($user->socid > 0)
+	accessforbidden();
+
+
+/*
+ * Actions
+ */
+
+if ($action == 'ventil' && $user->rights->accounting->bind->write)
+{
+	if (!$cancel)
+	{
+
+
+--------------------
+Filename: card.php
+Message: FIX BlindBoolean SQL injection reported by Christian Weiler
+<sak1.s3curity@gmail.com>
+
+Diff: @@ -38,8 +38,8 @@ $action = GETPOST('action', 'alpha');
+ $cancel = GETPOST('cancel', 'alpha');
+ $backtopage = GETPOST('backtopage', 'alpha');
+ 
+-$codeventil = GETPOST('codeventil');
+-$id = GETPOST('id');
++$codeventil = GETPOST('codeventil', 'int');
++$id = GETPOST('id', 'int');
+ 
+ // Security check
+ if ($user->socid > 0)
+
+Code after:
+require '../../main.inc.php';
+
+require_once DOL_DOCUMENT_ROOT.'/fourn/class/fournisseur.facture.class.php';
+require_once DOL_DOCUMENT_ROOT.'/core/class/html.formaccounting.class.php';
+
+// Load translation files required by the page
+$langs->loadLangs(array("bills", "accountancy"));
+
+$action = GETPOST('action', 'alpha');
+$cancel = GETPOST('cancel', 'alpha');
+$backtopage = GETPOST('backtopage', 'alpha');
+
+$codeventil = GETPOST('codeventil', 'int');
+$id = GETPOST('id', 'int');
+
+// Security check
+if ($user->socid > 0)
+	accessforbidden();
+
+
+/*
+ * Actions
+ */
+
+if ($action == 'ventil' && $user->rights->accounting->bind->write)
+{
+	if (!$cancel)
+	{
+
+
+--------------------
+Filename: info.php
+Message: FIX BlindBoolean SQL injection reported by Christian Weiler
+<sak1.s3curity@gmail.com>
+
+Diff: @@ -27,7 +27,7 @@ require_once DOL_DOCUMENT_ROOT.'/comm/mailing/class/mailing.class.php';
+ require_once DOL_DOCUMENT_ROOT.'/core/lib/functions2.lib.php';
+ require_once DOL_DOCUMENT_ROOT.'/core/lib/emailing.lib.php';
+ 
+-$id = GETPOST('id');
++$id = GETPOST('id', 'int');
+ 
+ // Load translation files required by the page
+ $langs->load("mails");
+
+Code after:
+
+/**
+ *      \file       htdocs/comm/mailing/info.php
+ *      \ingroup    mailing
+ *		\brief      Page with log information for emailing
+ */
+
+require '../../main.inc.php';
+require_once DOL_DOCUMENT_ROOT.'/comm/mailing/class/mailing.class.php';
+require_once DOL_DOCUMENT_ROOT.'/core/lib/functions2.lib.php';
+require_once DOL_DOCUMENT_ROOT.'/core/lib/emailing.lib.php';
+
+$id = GETPOST('id', 'int');
+
+// Load translation files required by the page
+$langs->load("mails");
+
+// Security check
+if (!$user->rights->mailing->lire || $user->socid > 0)
+accessforbidden();
+
+
+
+/*
+ * View
+ */
+
+
+
+--------------------
+Filename: info.php
+Message: FIX BlindBoolean SQL injection reported by Christian Weiler
+<sak1.s3curity@gmail.com>
+
+Diff: @@ -31,7 +31,7 @@ require_once DOL_DOCUMENT_ROOT.'/core/lib/payments.lib.php';
+ // Load translation files required by the page
+ $langs->loadLangs(array('bills', 'companies'));
+ 
+-$id = GETPOST('id');
++$id = GETPOST('id', 'int');
+ $ref = GETPOST('ref', 'alpha');
+ $action = GETPOST('action', 'alpha');
+ $confirm = GETPOST('confirm', 'alpha');
+
+Code after:
+ *		\ingroup    facture
+ *		\brief      Onglet info d'un paiement
+ */
+
+require '../../main.inc.php';
+require_once DOL_DOCUMENT_ROOT.'/core/lib/functions2.lib.php';
+require_once DOL_DOCUMENT_ROOT.'/compta/paiement/class/paiement.class.php';
+require_once DOL_DOCUMENT_ROOT.'/core/lib/payments.lib.php';
+
+// Load translation files required by the page
+$langs->loadLangs(array('bills', 'companies'));
+
+$id = GETPOST('id', 'int');
+$ref = GETPOST('ref', 'alpha');
+$action = GETPOST('action', 'alpha');
+$confirm = GETPOST('confirm', 'alpha');
+
+/*
+ * Actions
+ */
+
+// None
+
+
+/*
+ * View
+ */
+
+
+--------------------
+Filename: get_attribute_values.php
+Message: FIX BlindBoolean SQL injection reported by Christian Weiler
+<sak1.s3curity@gmail.com>
+
+Diff: @@ -28,7 +28,7 @@ require_once DOL_DOCUMENT_ROOT.'/variants/class/ProductAttributeValue.class.php'
+ 
+ header('Content-Type: application/json');
+ 
+-$id = GETPOST('id');
++$id = GETPOST('id', 'int');
+ 
+ if (!$id) {
+     print json_encode(array(
+
+Code after:
+if (! defined('NOREQUIREMENU'))  define('NOREQUIREMENU', '1');
+if (! defined('NOREQUIREHTML'))  define('NOREQUIREHTML', '1');
+if (! defined('NOREQUIREAJAX'))  define('NOREQUIREAJAX', '1');
+if (! defined('NOREQUIRESOC'))   define('NOREQUIRESOC', '1');
+
+require '../../main.inc.php';
+require_once DOL_DOCUMENT_ROOT.'/product/class/product.class.php';
+require_once DOL_DOCUMENT_ROOT.'/variants/class/ProductAttribute.class.php';
+require_once DOL_DOCUMENT_ROOT.'/variants/class/ProductAttributeValue.class.php';
+
+header('Content-Type: application/json');
+
+$id = GETPOST('id', 'int');
+
+if (!$id) {
+    print json_encode(array(
+        'error' => 'ID not set'
+    ));
+    exit();
+}
+
+$prodattr = new ProductAttribute($db);
+
+if ($prodattr->fetch($id) < 0) {
+    print json_encode(array(
+        'error' => 'Attribute not found'
+    ));
+
+
+--------------------
+Filename: functions.lib.php
+Message: FIX SQL injection on user/index.php parameter search_statut.
+
+Diff: @@ -286,6 +286,9 @@ function GETPOST($paramname,$check='',$method=0,$filter=NULL,$options=NULL)
+ 	        case 'int':
+ 	            if (! is_numeric($out)) { $out=''; }
+ 	            break;
++	        case 'intcomma':
++	            if (preg_match('/[^0-9,]+/i',$out)) $out='';
++	            break;
+ 	        case 'alpha':
+ 	            $out=trim($out);
+ 	            // '"' is dangerous because param in url can close the href= or src= and add javascript functions.
+
+Code after:
+	        elseif ($reg[1] == 'MYCOUNTRYID')
+	        {
+	            global $mysoc;
+	            $out = $mysoc->country_id;
+	        }
+	    }
+	     
+	    switch ($check)
+	    {
+	        case 'int':
+	            if (! is_numeric($out)) { $out=''; }
+	            break;
+	        case 'intcomma':
+	            if (preg_match('/[^0-9,]+/i',$out)) $out='';
+	            break;
+	        case 'alpha':
+	            $out=trim($out);
+	            // '"' is dangerous because param in url can close the href= or src= and add javascript functions.
+	            // '../' is dangerous because it allows dir transversals
+	            if (preg_match('/"/',$out)) $out='';
+	            else if (preg_match('/\.\.\//',$out)) $out='';
+	            break;
+	        case 'san_alpha':
+	            $out=filter_var($out,FILTER_SANITIZE_STRING);
+	            break;
+	        case 'aZ':
+	            $out=trim($out);
+	            if (preg_match('/[^a-z]+/i',$out)) $out='';
+	            break;
+
+
+--------------------
+Filename: functions.lib.php
+Message: FIX SQL injection
+
+Diff: @@ -6199,6 +6199,8 @@ function natural_search($fields, $value, $mode=0, $nofirstand=0)
+ {
+     global $db,$langs;
+ 
++    $value=trim($value);
++
+     if ($mode == 0)
+     {
+     	$value=preg_replace('/\*/','%',$value);	// Replace * with %
+
+Code after:
+ *                                         like "keyword1 keyword2" = We want record field like keyword1 AND field like keyword2
+ *                                         or like "keyword1|keyword2" = We want record field like keyword1 OR field like keyword2
+ *                             			If param $mode is 1, can contains an operator <, > or = like "<10" or ">=100.5 < 1000"
+ *                             			If param $mode is 2, can contains a list of id separated by comma like "1,3,4"
+ * @param	integer			$mode		0=value is list of keyword strings, 1=value is a numeric test (Example ">5.5 <10"), 2=value is a list of id separated with comma (Example '1,3,4')
+ * @param	integer			$nofirstand	1=Do not output the first 'AND'
+ * @return 	string 			$res 		The statement to append to the SQL query
+ */
+function natural_search($fields, $value, $mode=0, $nofirstand=0)
+{
+    global $db,$langs;
+
+    $value=trim($value);
+
+    if ($mode == 0)
+    {
+    	$value=preg_replace('/\*/','%',$value);	// Replace * with %
+    }
+    if ($mode == 1)
+    {
+    	$value=preg_replace('/([<>=]+)\s+([0-9'.preg_quote($langs->trans("DecimalSeparator"),'/').'\-])/','\1\2',$value);	// Clean string '< 10' into '<10' so we can the explode on space to get all tests to do
+    }
+
+    $value = preg_replace('/\s*\|\s*/','|', $value);
+
+    $crits = explode(' ', $value);
+    $res = '';
+    if (! is_array($fields)) $fields = array($fields);
+
+
+--------------------
+Filename: note.php
+Message: FIX SQL injection
+
+Diff: @@ -84,7 +84,7 @@ if ($id > 0 || ! empty($ref))
+ 
+ 	$head = donation_prepare_head($object);
+ 
+-	dol_fiche_head($head, 'note', $langs->trans("Donation"), 0, 'generic');
++	dol_fiche_head($head, 'note', $langs->trans("Donation"), -1, 'generic');
+ 
+ 	$linkback = '<a href="'.DOL_URL_ROOT.'/don/list.php'.(! empty($socid)?'?socid='.$socid:'').'">'.$langs->trans("BackToList").'</a>';
+ 
+
+Code after:
+llxHeader('', $title, $helpurl);
+
+$form = new Form($db);
+if (! empty($conf->projet->enabled)) { $formproject = new FormProjets($db); }
+
+if ($id > 0 || ! empty($ref))
+{
+	$object = new Don($db);
+	$object->fetch($id,$ref);
+
+	$head = donation_prepare_head($object);
+
+	dol_fiche_head($head, 'note', $langs->trans("Donation"), -1, 'generic');
+
+	$linkback = '<a href="'.DOL_URL_ROOT.'/don/list.php'.(! empty($socid)?'?socid='.$socid:'').'">'.$langs->trans("BackToList").'</a>';
+
+	$morehtmlref='<div class="refidno">';
+	// Project
+	if (! empty($conf->projet->enabled))
+	{
+	    $langs->load("projects");
+	    $morehtmlref.=$langs->trans('Project') . ' ';
+	    if ($user->rights->don->creer)
+	    {
+	        if ($action != 'classify')
+	            // $morehtmlref.='<a href="' . $_SERVER['PHP_SELF'] . '?action=classify&amp;id=' . $object->id . '">' . img_edit($langs->transnoentitiesnoconv('SetProject')) . '</a> : ';
+	            if ($action == 'classify') {
+
+
+--------------------
+Filename: main.inc.php
+Message: FIX security vulnerability reported by ADLab of Venustech
+
+Diff: @@ -81,7 +81,8 @@ function test_sql_and_script_inject($val, $type)
+     // For SQL Injection (only GET and POST are used to be included into bad escaped SQL requests)
+     if ($type != 2)
+     {
+-        $inj += preg_match('/delete\s+from/i',	 $val);
++    	$inj += preg_match('/updatexml^(/i',	 $val);
++    	$inj += preg_match('/delete\s+from/i',	 $val);
+         $inj += preg_match('/create\s+table/i',	 $val);
+         $inj += preg_match('/update.+set.+=/i',  $val);
+         $inj += preg_match('/insert\s+into/i', 	 $val);
+
+Code after:
+ * Security: SQL Injection and XSS Injection (scripts) protection (Filters on GET, POST, PHP_SELF).
+ *
+ * @param		string		$val		Value
+ * @param		string		$type		1=GET, 0=POST, 2=PHP_SELF
+ * @return		int						>0 if there is an injection
+ */
+function test_sql_and_script_inject($val, $type)
+{
+    $inj = 0;
+    // For SQL Injection (only GET and POST are used to be included into bad escaped SQL requests)
+    if ($type != 2)
+    {
+    	$inj += preg_match('/updatexml^(/i',	 $val);
+    	$inj += preg_match('/delete\s+from/i',	 $val);
+        $inj += preg_match('/create\s+table/i',	 $val);
+        $inj += preg_match('/update.+set.+=/i',  $val);
+        $inj += preg_match('/insert\s+into/i', 	 $val);
+        $inj += preg_match('/select.+from/i', 	 $val);
+        $inj += preg_match('/union.+select/i', 	 $val);
+        $inj += preg_match('/into\s+(outfile|dumpfile)/i',  $val);
+        $inj += preg_match('/(\.\.%2f)+/i',		 $val);
+    }
+    // For XSS Injection done by adding javascript with script
+    // This is all cases a browser consider text is javascript:
+    // When it found '<script', 'javascript:', '<style', 'onload\s=' on body tag, '="&' on a tag size with old browsers
+    // All examples on page: http://ha.ckers.org/xss.html#XSScalc
+    $inj += preg_match('/<script/i', $val);
+    if (! defined('NOSTYLECHECK')) $inj += preg_match('/<style/i', $val);
+
+
+--------------------
+
+********************
+CWE-639: Authorization Bypass Through User-Controlled Key (476 samples)
+********************
+Filename: ProjectEditController.php
+Message: Avoid people to alter other projects by changing form data
+
+Diff: @@ -65,6 +65,8 @@ class ProjectEditController extends BaseController
+      */
+     private function prepareValues(array $project, array $values)
+     {
++        $values['id'] = $project['id'];
++
+         if (isset($values['is_private'])) {
+             if (! $this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                 unset($values['is_private']);
+
+Code after:
+    }
+
+    /**
+     * Prepare form values
+     *
+     * @access private
+     * @param  array  $project
+     * @param  array  $values
+     * @return array
+     */
+    private function prepareValues(array $project, array $values)
+    {
+        $values['id'] = $project['id'];
+
+        if (isset($values['is_private'])) {
+            if (! $this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                unset($values['is_private']);
+            }
+        } elseif ($project['is_private'] == 1 && ! isset($values['is_private'])) {
+            if ($this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                $values += array('is_private' => 0);
+            }
+        }
+
+        return $values;
+    }
+}
+
+
+--------------------
+Filename: ProjectEditController.php
+Message: Avoid people to alter other projects by changing form data
+
+Diff: @@ -65,6 +65,8 @@ class ProjectEditController extends BaseController
+      */
+     private function prepareValues(array $project, array $values)
+     {
++        $values['id'] = $project['id'];
++
+         if (isset($values['is_private'])) {
+             if (! $this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                 unset($values['is_private']);
+
+Code after:
+    }
+
+    /**
+     * Prepare form values
+     *
+     * @access private
+     * @param  array  $project
+     * @param  array  $values
+     * @return array
+     */
+    private function prepareValues(array $project, array $values)
+    {
+        $values['id'] = $project['id'];
+
+        if (isset($values['is_private'])) {
+            if (! $this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                unset($values['is_private']);
+            }
+        } elseif ($project['is_private'] == 1 && ! isset($values['is_private'])) {
+            if ($this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                $values += array('is_private' => 0);
+            }
+        }
+
+        return $values;
+    }
+}
+
+
+--------------------
+Filename: ProjectEditController.php
+Message: Avoid people to alter other projects by changing form data
+
+Diff: @@ -65,6 +65,8 @@ class ProjectEditController extends BaseController
+      */
+     private function prepareValues(array $project, array $values)
+     {
++        $values['id'] = $project['id'];
++
+         if (isset($values['is_private'])) {
+             if (! $this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                 unset($values['is_private']);
+
+Code after:
+    }
+
+    /**
+     * Prepare form values
+     *
+     * @access private
+     * @param  array  $project
+     * @param  array  $values
+     * @return array
+     */
+    private function prepareValues(array $project, array $values)
+    {
+        $values['id'] = $project['id'];
+
+        if (isset($values['is_private'])) {
+            if (! $this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                unset($values['is_private']);
+            }
+        } elseif ($project['is_private'] == 1 && ! isset($values['is_private'])) {
+            if ($this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                $values += array('is_private' => 0);
+            }
+        }
+
+        return $values;
+    }
+}
+
+
+--------------------
+Filename: ProjectEditController.php
+Message: Avoid people to alter other projects by changing form data
+
+Diff: @@ -65,6 +65,8 @@ class ProjectEditController extends BaseController
+      */
+     private function prepareValues(array $project, array $values)
+     {
++        $values['id'] = $project['id'];
++
+         if (isset($values['is_private'])) {
+             if (! $this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                 unset($values['is_private']);
+
+Code after:
+    }
+
+    /**
+     * Prepare form values
+     *
+     * @access private
+     * @param  array  $project
+     * @param  array  $values
+     * @return array
+     */
+    private function prepareValues(array $project, array $values)
+    {
+        $values['id'] = $project['id'];
+
+        if (isset($values['is_private'])) {
+            if (! $this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                unset($values['is_private']);
+            }
+        } elseif ($project['is_private'] == 1 && ! isset($values['is_private'])) {
+            if ($this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                $values += array('is_private' => 0);
+            }
+        }
+
+        return $values;
+    }
+}
+
+
+--------------------
+Filename: ProjectEditController.php
+Message: Avoid people to alter other projects by changing form data
+
+Diff: @@ -65,6 +65,8 @@ class ProjectEditController extends BaseController
+      */
+     private function prepareValues(array $project, array $values)
+     {
++        $values['id'] = $project['id'];
++
+         if (isset($values['is_private'])) {
+             if (! $this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                 unset($values['is_private']);
+
+Code after:
+    }
+
+    /**
+     * Prepare form values
+     *
+     * @access private
+     * @param  array  $project
+     * @param  array  $values
+     * @return array
+     */
+    private function prepareValues(array $project, array $values)
+    {
+        $values['id'] = $project['id'];
+
+        if (isset($values['is_private'])) {
+            if (! $this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                unset($values['is_private']);
+            }
+        } elseif ($project['is_private'] == 1 && ! isset($values['is_private'])) {
+            if ($this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                $values += array('is_private' => 0);
+            }
+        }
+
+        return $values;
+    }
+}
+
+
+--------------------
+Filename: ProjectEditController.php
+Message: Avoid people to alter other projects by changing form data
+
+Diff: @@ -65,6 +65,8 @@ class ProjectEditController extends BaseController
+      */
+     private function prepareValues(array $project, array $values)
+     {
++        $values['id'] = $project['id'];
++
+         if (isset($values['is_private'])) {
+             if (! $this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                 unset($values['is_private']);
+
+Code after:
+    }
+
+    /**
+     * Prepare form values
+     *
+     * @access private
+     * @param  array  $project
+     * @param  array  $values
+     * @return array
+     */
+    private function prepareValues(array $project, array $values)
+    {
+        $values['id'] = $project['id'];
+
+        if (isset($values['is_private'])) {
+            if (! $this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                unset($values['is_private']);
+            }
+        } elseif ($project['is_private'] == 1 && ! isset($values['is_private'])) {
+            if ($this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                $values += array('is_private' => 0);
+            }
+        }
+
+        return $values;
+    }
+}
+
+
+--------------------
+Filename: ProjectEditController.php
+Message: Avoid people to alter other projects by changing form data
+
+Diff: @@ -65,6 +65,8 @@ class ProjectEditController extends BaseController
+      */
+     private function prepareValues(array $project, array $values)
+     {
++        $values['id'] = $project['id'];
++
+         if (isset($values['is_private'])) {
+             if (! $this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                 unset($values['is_private']);
+
+Code after:
+    }
+
+    /**
+     * Prepare form values
+     *
+     * @access private
+     * @param  array  $project
+     * @param  array  $values
+     * @return array
+     */
+    private function prepareValues(array $project, array $values)
+    {
+        $values['id'] = $project['id'];
+
+        if (isset($values['is_private'])) {
+            if (! $this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                unset($values['is_private']);
+            }
+        } elseif ($project['is_private'] == 1 && ! isset($values['is_private'])) {
+            if ($this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                $values += array('is_private' => 0);
+            }
+        }
+
+        return $values;
+    }
+}
+
+
+--------------------
+Filename: ProjectEditController.php
+Message: Avoid people to alter other projects by changing form data
+
+Diff: @@ -65,6 +65,8 @@ class ProjectEditController extends BaseController
+      */
+     private function prepareValues(array $project, array $values)
+     {
++        $values['id'] = $project['id'];
++
+         if (isset($values['is_private'])) {
+             if (! $this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                 unset($values['is_private']);
+
+Code after:
+    }
+
+    /**
+     * Prepare form values
+     *
+     * @access private
+     * @param  array  $project
+     * @param  array  $values
+     * @return array
+     */
+    private function prepareValues(array $project, array $values)
+    {
+        $values['id'] = $project['id'];
+
+        if (isset($values['is_private'])) {
+            if (! $this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                unset($values['is_private']);
+            }
+        } elseif ($project['is_private'] == 1 && ! isset($values['is_private'])) {
+            if ($this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                $values += array('is_private' => 0);
+            }
+        }
+
+        return $values;
+    }
+}
+
+
+--------------------
+Filename: ProjectEditController.php
+Message: Avoid people to alter other projects by changing form data
+
+Diff: @@ -65,6 +65,8 @@ class ProjectEditController extends BaseController
+      */
+     private function prepareValues(array $project, array $values)
+     {
++        $values['id'] = $project['id'];
++
+         if (isset($values['is_private'])) {
+             if (! $this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                 unset($values['is_private']);
+
+Code after:
+    }
+
+    /**
+     * Prepare form values
+     *
+     * @access private
+     * @param  array  $project
+     * @param  array  $values
+     * @return array
+     */
+    private function prepareValues(array $project, array $values)
+    {
+        $values['id'] = $project['id'];
+
+        if (isset($values['is_private'])) {
+            if (! $this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                unset($values['is_private']);
+            }
+        } elseif ($project['is_private'] == 1 && ! isset($values['is_private'])) {
+            if ($this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                $values += array('is_private' => 0);
+            }
+        }
+
+        return $values;
+    }
+}
+
+
+--------------------
+Filename: ProjectEditController.php
+Message: Avoid people to alter other projects by changing form data
+
+Diff: @@ -65,6 +65,8 @@ class ProjectEditController extends BaseController
+      */
+     private function prepareValues(array $project, array $values)
+     {
++        $values['id'] = $project['id'];
++
+         if (isset($values['is_private'])) {
+             if (! $this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                 unset($values['is_private']);
+
+Code after:
+    }
+
+    /**
+     * Prepare form values
+     *
+     * @access private
+     * @param  array  $project
+     * @param  array  $values
+     * @return array
+     */
+    private function prepareValues(array $project, array $values)
+    {
+        $values['id'] = $project['id'];
+
+        if (isset($values['is_private'])) {
+            if (! $this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                unset($values['is_private']);
+            }
+        } elseif ($project['is_private'] == 1 && ! isset($values['is_private'])) {
+            if ($this->helper->user->hasProjectAccess('ProjectCreationController', 'create', $project['id'])) {
+                $values += array('is_private' => 0);
+            }
+        }
+
+        return $values;
+    }
+}
+
+
+--------------------
+
+********************
+CWE-352: Cross-Site Request Forgery (CSRF) (424 samples)
+********************
+Filename: CsrfComponent.php
+Message: Only allow GET, HEAD, OPTIONS to not have CSRF tokens.
+
+This covers cases where bad guys make up fake HTTP methods to trick CSRF
+validation.
+
+Update test cases to not muck about in $_SERVER too.
+
+Diff: @@ -94,7 +94,7 @@ class CsrfComponent extends Component
+         if ($request->is('get') && $cookieData === null) {
+             $this->_setCookie($request, $response);
+         }
+-        if ($request->is(['patch', 'put', 'post', 'delete'])) {
++        if (!$request->is(['head', 'get', 'options'])) {
+             $this->_validateToken($request);
+             unset($request->data[$this->_config['field']]);
+         }
+
+Code after:
+        $cookieData = $request->cookie($cookieName);
+        if ($cookieData) {
+            $request->params['_csrfToken'] = $cookieData;
+        }
+
+        if ($request->is('requested')) {
+            return;
+        }
+
+        if ($request->is('get') && $cookieData === null) {
+            $this->_setCookie($request, $response);
+        }
+        if (!$request->is(['head', 'get', 'options'])) {
+            $this->_validateToken($request);
+            unset($request->data[$this->_config['field']]);
+        }
+    }
+
+    /**
+     * Events supported by this component.
+     *
+     * @return array
+     */
+    public function implementedEvents()
+    {
+        return [
+            'Controller.startup' => 'startup',
+
+
+--------------------
+Filename: url_generating.lib.php
+Message: bug #4899 [security] CSRF vulnerability in setup
+
+Signed-off-by: Madhura Jayaratne <madhura.cj@gmail.com>
+
+Diff: @@ -179,6 +179,7 @@ function PMA_URL_getCommon($params = array(), $encode = 'html', $divider = '?')
+     if (isset($GLOBALS['server'])
+         && $GLOBALS['server'] != $GLOBALS['cfg']['ServerDefault']
+         && ! isset($params['server'])
++        && ! defined('PMA_SETUP')
+     ) {
+         $params['server'] = $GLOBALS['server'];
+     }
+
+Code after:
+ *
+ * @return string   string with URL parameters
+ * @access  public
+ */
+function PMA_URL_getCommon($params = array(), $encode = 'html', $divider = '?')
+{
+    $separator = PMA_URL_getArgSeparator();
+
+    // avoid overwriting when creating navi panel links to servers
+    if (isset($GLOBALS['server'])
+        && $GLOBALS['server'] != $GLOBALS['cfg']['ServerDefault']
+        && ! isset($params['server'])
+        && ! defined('PMA_SETUP')
+    ) {
+        $params['server'] = $GLOBALS['server'];
+    }
+
+    if (empty($_COOKIE['pma_lang']) && ! empty($GLOBALS['lang'])) {
+        $params['lang'] = $GLOBALS['lang'];
+    }
+    if (empty($_COOKIE['pma_collation_connection'])
+        && ! empty($GLOBALS['collation_connection'])
+    ) {
+        $params['collation_connection'] = $GLOBALS['collation_connection'];
+    }
+
+    if (isset($_SESSION[' PMA_token '])) {
+
+
+--------------------
+Filename: form.inc.php
+Message: bug #4899 [security] CSRF vulnerability in setup
+
+Signed-off-by: Madhura Jayaratne <madhura.cj@gmail.com>
+
+Diff: @@ -19,8 +19,8 @@
+ 
+ require './libraries/config/setup.forms.php';
+ 
+-$formset_id = filter_input(INPUT_GET, 'formset');
+-$mode = filter_input(INPUT_GET, 'mode');
++$formset_id = isset($_GET['formset']) ? $_GET['formset'] : null;
++$mode = isset($_GET['mode']) ? $_GET['mode'] : null;
+ if (! isset($forms[$formset_id])) {
+     PMA_fatalError(__('Incorrect formset, check $formsets array in setup/frames/form.inc.php!'));
+ }
+
+Code after:
+    exit;
+}
+
+/**
+ * Core libraries.
+ */
+require_once './libraries/config/Form.class.php';
+require_once './libraries/config/FormDisplay.class.php';
+require_once './setup/lib/form_processing.lib.php';
+
+require './libraries/config/setup.forms.php';
+
+$formset_id = isset($_GET['formset']) ? $_GET['formset'] : null;
+$mode = isset($_GET['mode']) ? $_GET['mode'] : null;
+if (! isset($forms[$formset_id])) {
+    PMA_fatalError(__('Incorrect formset, check $formsets array in setup/frames/form.inc.php!'));
+}
+
+if (isset($GLOBALS['strConfigFormset_' . $formset_id])) {
+    echo '<h2>' . $GLOBALS['strConfigFormset_' . $formset_id] . '</h2>';
+}
+$form_display = new FormDisplay($GLOBALS['ConfigFile']);
+foreach ($forms[$formset_id] as $form_name => $form) {
+    $form_display->registerForm($form_name, $form);
+}
+PMA_Process_formset($form_display);
+?>
+
+
+--------------------
+Filename: servers.inc.php
+Message: bug #4899 [security] CSRF vulnerability in setup
+
+Signed-off-by: Madhura Jayaratne <madhura.cj@gmail.com>
+
+Diff: @@ -19,8 +19,8 @@
+ 
+ require './libraries/config/setup.forms.php';
+ 
+-$mode = filter_input(INPUT_GET, 'mode');
+-$id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
++$mode = isset($_GET['mode']) ? $_GET['mode'] : null;
++$id = PMA_isValid($_GET['id'], 'numeric') ? $_GET['id'] : null;
+ 
+ $cf = $GLOBALS['ConfigFile'];
+ $server_exists = !empty($id) && $cf->get("Servers/$id") !== null;
+
+Code after:
+    exit;
+}
+
+/**
+ * Core libraries.
+ */
+require_once './libraries/config/Form.class.php';
+require_once './libraries/config/FormDisplay.class.php';
+require_once './setup/lib/form_processing.lib.php';
+
+require './libraries/config/setup.forms.php';
+
+$mode = isset($_GET['mode']) ? $_GET['mode'] : null;
+$id = PMA_isValid($_GET['id'], 'numeric') ? $_GET['id'] : null;
+
+$cf = $GLOBALS['ConfigFile'];
+$server_exists = !empty($id) && $cf->get("Servers/$id") !== null;
+
+if ($mode == 'edit' && $server_exists) {
+    $page_title = __('Edit server')
+        . ' ' . $id
+        . ' <small>(' . htmlspecialchars($cf->getServerDSN($id)) . ')</small>';
+} elseif ($mode == 'remove' && $server_exists) {
+    $cf->removeServer($id);
+    header('Location: index.php');
+    exit;
+} elseif ($mode == 'revert' && $server_exists) {
+    // handled by process_formset()
+
+
+--------------------
+Filename: index.inc.php
+Message: Require POST method to delete servers in Setup
+
+Signed-off-by: Maurício Meneghini Fauth <mauricio@fauth.dev>
+
+Diff: @@ -156,8 +156,9 @@
+         echo '<a href="' , Url::getCommon(array('page' => 'servers', 'mode' => 'edit', 'id' => $id)), '">'
+             , __('Edit') , '</a>';
+         echo ' | ';
+-        echo '<a href="' , Url::getCommon(array('page' => 'servers', 'mode' => 'remove', 'id' => $id)), '">'
+-            , __('Delete') , '</a>';
++        echo '<a class="delete-server" href="' . Url::getCommon(array('page' => 'servers', 'mode' => 'remove', 'id' => $id));
++        echo '" data-post="' . Url::getCommon(array('token' => $_SESSION[' PMA_token ']), '') . '">';
++        echo __('Delete') . '</a>';
+         echo '</small>';
+         echo '</td>';
+         echo '</tr>';
+
+Code after:
+        echo '<tr>';
+        echo '<td>' , $id  , '</td>';
+        echo '<td>' , htmlspecialchars($cf->getServerName($id)) , '</td>';
+        echo '<td>'
+            , htmlspecialchars($cf->getValue("Servers/$id/auth_type"))
+            ,  '</td>';
+        echo '<td>' , htmlspecialchars($cf->getServerDSN($id)) , '</td>';
+        echo '<td class="nowrap">';
+        echo '<small>';
+        echo '<a href="' , Url::getCommon(array('page' => 'servers', 'mode' => 'edit', 'id' => $id)), '">'
+            , __('Edit') , '</a>';
+        echo ' | ';
+        echo '<a class="delete-server" href="' . Url::getCommon(array('page' => 'servers', 'mode' => 'remove', 'id' => $id));
+        echo '" data-post="' . Url::getCommon(array('token' => $_SESSION[' PMA_token ']), '') . '">';
+        echo __('Delete') . '</a>';
+        echo '</small>';
+        echo '</td>';
+        echo '</tr>';
+    }
+    echo '</table>';
+} else {
+    echo '<table width="100%">';
+    echo '<tr>';
+    echo '<td>';
+    echo '<i>' , __('There are no configured servers') , '</i>';
+    echo '</td>';
+    echo '</tr>';
+    echo '</table>';
+}
+
+
+--------------------
+Filename: servers.inc.php
+Message: Require POST method to delete servers in Setup
+
+Signed-off-by: Maurício Meneghini Fauth <mauricio@fauth.dev>
+
+Diff: @@ -27,7 +27,7 @@
+     $page_title = __('Edit server')
+         . ' ' . $id
+         . ' <small>(' . htmlspecialchars($cf->getServerDSN($id)) . ')</small>';
+-} elseif ($mode == 'remove' && $server_exists) {
++} elseif ($mode == 'remove' && $server_exists && $_SERVER['REQUEST_METHOD'] == 'POST') {
+     $cf->removeServer($id);
+     header('Location: index.php' . Url::getCommonRaw());
+     exit;
+
+Code after:
+
+$mode = isset($_GET['mode']) ? $_GET['mode'] : null;
+$id = Core::isValid($_GET['id'], 'numeric') ? intval($_GET['id']) : null;
+
+/** @var ConfigFile $cf */
+$cf = $GLOBALS['ConfigFile'];
+$server_exists = !empty($id) && $cf->get("Servers/$id") !== null;
+
+if ($mode == 'edit' && $server_exists) {
+    $page_title = __('Edit server')
+        . ' ' . $id
+        . ' <small>(' . htmlspecialchars($cf->getServerDSN($id)) . ')</small>';
+} elseif ($mode == 'remove' && $server_exists && $_SERVER['REQUEST_METHOD'] == 'POST') {
+    $cf->removeServer($id);
+    header('Location: index.php' . Url::getCommonRaw());
+    exit;
+} elseif ($mode == 'revert' && $server_exists) {
+    // handled by process_formset()
+} else {
+    $page_title = __('Add a new server');
+    $id = 0;
+}
+if (isset($page_title)) {
+    echo '<h2>' , $page_title . '</h2>';
+}
+$form_display = new ServersForm($cf, $id);
+FormProcessing::process($form_display);
+
+
+--------------------
+Filename: enigma_ui.php
+Message: Protect download urls against CSRF using unique request tokens (#1490642)
+Send X-Frame-Options headers with every HTTP response
+
+Diff: @@ -459,6 +459,8 @@ class enigma_ui
+      */
+     private function key_export()
+     {
++        $this->rc->request_security_check(rcube_utils::INPUT_GET);
++
+         $keys   = rcube_utils::get_input_value('_keys', rcube_utils::INPUT_GPC);
+         $engine = $this->enigma->load_engine();
+         $list   = $keys == '*' ? $engine->list_keys() : explode(',', $keys);
+
+Code after:
+        $out .= html::tag('fieldset', null,
+            html::tag('legend', null,
+                $this->enigma->gettext('userids')) . $table->show());
+
+        return $out;
+    }
+
+    /**
+     * Key(s) export handler
+     */
+    private function key_export()
+    {
+        $this->rc->request_security_check(rcube_utils::INPUT_GET);
+
+        $keys   = rcube_utils::get_input_value('_keys', rcube_utils::INPUT_GPC);
+        $engine = $this->enigma->load_engine();
+        $list   = $keys == '*' ? $engine->list_keys() : explode(',', $keys);
+
+        if (is_array($list)) {
+            $filename = 'export.pgp';
+            if (count($list) == 1) {
+                $filename = (is_object($list[0]) ? $list[0]->id : $list[0]) . '.pgp';
+            }
+
+            // send downlaod headers
+            header('Content-Type: application/pgp-keys');
+            header('Content-Disposition: attachment; filename="' . $filename . '"');
+
+
+
+--------------------
+Filename: rcube_sieve_engine.php
+Message: Protect download urls against CSRF using unique request tokens (#1490642)
+Send X-Frame-Options headers with every HTTP response
+
+Diff: @@ -397,6 +397,8 @@ class rcube_sieve_engine
+                 }
+             }
+             else if ($action == 'setget') {
++                $this->rc->request_security_check(rcube_utils::INPUT_GET);
++
+                 $script_name = rcube_utils::get_input_value('_set', rcube_utils::INPUT_GPC, true);
+                 $script      = $this->sieve->get_script($script_name);
+ 
+
+Code after:
+                $result = $this->remove_script($script_name);
+
+                if ($result === true) {
+                    $this->rc->output->show_message('managesieve.setdeleted', 'confirmation');
+                    $this->rc->output->command('managesieve_updatelist', 'setdel',
+                        array('name' => $script_name));
+                    $this->rc->session->remove('managesieve_current');
+                } else {
+                    $this->rc->output->show_message('managesieve.setdeleteerror', 'error');
+                }
+            }
+            else if ($action == 'setget') {
+                $this->rc->request_security_check(rcube_utils::INPUT_GET);
+
+                $script_name = rcube_utils::get_input_value('_set', rcube_utils::INPUT_GPC, true);
+                $script      = $this->sieve->get_script($script_name);
+
+                if (is_a($script, 'PEAR_Error')) {
+                    exit;
+                }
+
+                $browser = new rcube_browser;
+
+                // send download headers
+                header("Content-Type: application/octet-stream");
+                header("Content-Length: ".strlen($script));
+
+                if ($browser->ie) {
+
+
+--------------------
+Filename: rcmail.php
+Message: Protect download urls against CSRF using unique request tokens (#1490642)
+Send X-Frame-Options headers with every HTTP response
+
+Diff: @@ -840,6 +840,8 @@ class rcmail extends rcube
+             // this need to be full url to make redirects work
+             $absolute = true;
+         }
++        else if ($secure && ($token = $this->get_request_token()))
++            $url .= $delm . '_token=' . urlencode($token);
+ 
+         if ($absolute || $full) {
+             // add base path to this Roundcube installation
+
+Code after:
+
+        if ($secure && ($token = $this->get_secure_url_token(true))) {
+            // add token to the url
+            $url = $token . '/' . $url;
+
+            // remove old token from the path
+            $base_path = rtrim($base_path, '/');
+            $base_path = preg_replace('/\/[a-zA-Z0-9]{' . strlen($token) . '}$/', '', $base_path);
+
+            // this need to be full url to make redirects work
+            $absolute = true;
+        }
+        else if ($secure && ($token = $this->get_request_token()))
+            $url .= $delm . '_token=' . urlencode($token);
+
+        if ($absolute || $full) {
+            // add base path to this Roundcube installation
+            if ($base_path == '') $base_path = '/';
+            $prefix = $base_path;
+
+            // prepend protocol://hostname:port
+            if ($full) {
+                $prefix = rcube_utils::resolve_url($prefix);
+            }
+
+            $prefix = rtrim($prefix, '/') . '/';
+        }
+        else {
+
+
+--------------------
+Filename: rcube_message.php
+Message: Protect download urls against CSRF using unique request tokens (#1490642)
+Send X-Frame-Options headers with every HTTP response
+
+Diff: @@ -108,7 +108,8 @@ class rcube_message
+             'get_url'     => $this->app->url(array(
+                     'action' => 'get',
+                     'mbox'   => $this->folder,
+-                    'uid'    => $uid))
++                    'uid'    => $uid),
++                false, false, true)
+         );
+ 
+         if (!empty($this->headers->structure)) {
+
+Code after:
+
+        $this->mime    = new rcube_mime($this->headers->charset);
+        $this->subject = $this->headers->get('subject');
+        list(, $this->sender) = each($this->mime->decode_address_list($this->headers->from, 1));
+
+        $this->set_safe($is_safe || $_SESSION['safe_messages'][$this->folder.':'.$uid]);
+        $this->opt = array(
+            'safe'        => $this->is_safe,
+            'prefer_html' => $this->app->config->get('prefer_html'),
+            'get_url'     => $this->app->url(array(
+                    'action' => 'get',
+                    'mbox'   => $this->folder,
+                    'uid'    => $uid),
+                false, false, true)
+        );
+
+        if (!empty($this->headers->structure)) {
+            $this->get_mime_numbers($this->headers->structure);
+            $this->parse_structure($this->headers->structure);
+        }
+        else {
+            $this->body = $this->storage->get_body($uid);
+        }
+
+        // notify plugins and let them analyze this structured message object
+        $this->app->plugins->exec_hook('message_load', array('object' => $this));
+    }
+
+
+
+--------------------
+
+********************
+CWE-22: Improper Limitation of a Pathname to a Restricted Directory ('Path Traversal') (318 samples)
+********************
+Filename: error_report.lib.php
+Message: bug #4595 [security] Path traversal can lead to leakage of line count
+
+Signed-off-by: Madhura Jayaratne <madhura.cj@gmail.com>
+
+Diff: @@ -177,6 +177,19 @@ function PMA_countLines($filename)
+         return $LINE_COUNT[$filename];
+     }
+ 
++    // ensure that the file is inside the phpMyAdmin folder
++    $depath = 1;
++    foreach (explode('/', $filename) as $part) {
++        if ($part == '..') {
++            $depath--;
++        } elseif ($part != '.') {
++            $depath++;
++        }
++        if ($depath < 0) {
++            return 0;
++        }
++    }
++
+     $linecount = 0;
+     $handle = fopen('./js/' . $filename, 'r');
+     while (!feof($handle)) {
+
+Code after:
+ *
+ * @param string $filename javascript filename
+ *
+ * @return Number of lines
+ */
+function PMA_countLines($filename)
+{
+    global $LINE_COUNT;
+    if (defined('LINE_COUNTS')) {
+        return $LINE_COUNT[$filename];
+    }
+
+    // ensure that the file is inside the phpMyAdmin folder
+    $depath = 1;
+    foreach (explode('/', $filename) as $part) {
+        if ($part == '..') {
+            $depath--;
+        } elseif ($part != '.') {
+            $depath++;
+        }
+        if ($depath < 0) {
+            return 0;
+        }
+    }
+
+    $linecount = 0;
+    $handle = fopen('./js/' . $filename, 'r');
+    while (!feof($handle)) {
+        $line = fgets($handle);
+        if ($line === false) {
+            break;
+        }
+        $linecount++;
+    }
+    fclose($handle);
+    return $linecount;
+}
+
+/**
+
+
+--------------------
+Filename: GIS_Factory.class.php
+Message: bug #4594 [security] Path traversal in file inclusion of GIS factory
+
+Signed-off-by: Madhura Jayaratne <madhura.cj@gmail.com>
+
+Diff: @@ -33,7 +33,9 @@ public static function factory($type)
+         include_once './libraries/gis/GIS_Geometry.class.php';
+ 
+         $type_lower = strtolower($type);
+-        if (! file_exists('./libraries/gis/GIS_' . ucfirst($type_lower) . '.class.php')) {
++        if (! PMA_isValid($type_lower, PMA_Util::getGISDatatypes())
++            || ! file_exists('./libraries/gis/GIS_' . ucfirst($type_lower) . '.class.php')
++        ) {
+             return false;
+         }
+         if (include_once './libraries/gis/GIS_' . ucfirst($type_lower) . '.class.php') {
+
+Code after:
+     *
+     * @return PMA_GIS_Geometry the singleton instance of geometric class
+     *                          of the given type
+     *
+     * @access public
+     * @static
+     */
+    public static function factory($type)
+    {
+        include_once './libraries/gis/GIS_Geometry.class.php';
+
+        $type_lower = strtolower($type);
+        if (! PMA_isValid($type_lower, PMA_Util::getGISDatatypes())
+            || ! file_exists('./libraries/gis/GIS_' . ucfirst($type_lower) . '.class.php')
+        ) {
+            return false;
+        }
+        if (include_once './libraries/gis/GIS_' . ucfirst($type_lower) . '.class.php') {
+            switch(strtoupper($type)) {
+            case 'MULTIPOLYGON' :
+                return PMA_GIS_Multipolygon::singleton();
+            case 'POLYGON' :
+                return PMA_GIS_Polygon::singleton();
+            case 'MULTIPOINT' :
+                return PMA_GIS_Multipoint::singleton();
+            case 'POINT' :
+                return PMA_GIS_Point::singleton();
+            case 'MULTILINESTRING' :
+                return PMA_GIS_Multilinestring::singleton();
+
+
+--------------------
+Filename: error_report.lib.php
+Message: Fix possible path existence disclossure
+
+On non released versions (where line counts are not precalculated) it
+was possible to check for file existence due to limited checks for
+supplied path.
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+
+Diff: @@ -238,7 +238,7 @@ function PMA_countLines($filename)
+     foreach (explode('/', $filename) as $part) {
+         if ($part == '..') {
+             $depath--;
+-        } elseif ($part != '.') {
++        } elseif ($part != '.' || $part === '') {
+             $depath++;
+         }
+         if ($depath < 0) {
+
+Code after:
+function PMA_countLines($filename)
+{
+    global $LINE_COUNT;
+    if (defined('LINE_COUNTS')) {
+        return $LINE_COUNT[$filename];
+    }
+
+    // ensure that the file is inside the phpMyAdmin folder
+    $depath = 1;
+    foreach (explode('/', $filename) as $part) {
+        if ($part == '..') {
+            $depath--;
+        } elseif ($part != '.' || $part === '') {
+            $depath++;
+        }
+        if ($depath < 0) {
+            return 0;
+        }
+    }
+
+    $linecount = 0;
+    $handle = fopen('./js/' . $filename, 'r');
+    while (!feof($handle)) {
+        $line = fgets($handle);
+        if ($line === false) {
+            break;
+        }
+
+
+--------------------
+Filename: document.php
+Message: Fix: Multiple directory traversal vulnerabilities with document.php
+
+Diff: @@ -2,7 +2,7 @@
+ /* Copyright (C) 2003-2004 Rodolphe Quiedeville  <rodolphe@quiedeville.org>
+  * Copyright (C) 2004-2010 Laurent Destailleur   <eldy@users.sourceforge.net>
+  * Copyright (C) 2005      Marc Barilley / Ocebo <marc@ocebo.com>
+- * Copyright (C) 2005-2009 Regis Houssin         <regis@dolibarr.fr>
++ * Copyright (C) 2005-2012 Regis Houssin         <regis@dolibarr.fr>
+  * Copyright (C) 2005      Simon TOSSER          <simon@kornog-computing.com>
+  *
+  * This program is free software; you can redistribute it and/or modify
+
+Code after:
+<?php
+/* Copyright (C) 2003-2004 Rodolphe Quiedeville  <rodolphe@quiedeville.org>
+ * Copyright (C) 2004-2010 Laurent Destailleur   <eldy@users.sourceforge.net>
+ * Copyright (C) 2005      Marc Barilley / Ocebo <marc@ocebo.com>
+ * Copyright (C) 2005-2012 Regis Houssin         <regis@dolibarr.fr>
+ * Copyright (C) 2005      Simon TOSSER          <simon@kornog-computing.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+
+
+--------------------
+Filename: javascript.php
+Message: XSS / LFI Fox
+
+Diff: @@ -194,6 +194,17 @@ class FrontendJavascript
+ 	 */
+ 	private function setModule($value)
+ 	{
++		$modules = (array) FrontendModel::getModules();
++		
++		if(!in_array((string) $value, $modules))
++		{
++			// when debug is on throw an exception
++			if(SPOON_DEBUG) throw new FrontendException('Invalid file.');
++
++			// when debug is of show a descent message
++			else exit(SPOON_DEBUG_MESSAGE);
++		}
++		
+ 		$this->module = (string) $value;
+ 	}
+ }
+
+Code after:
+
+		// set the locale (we need this for the labels)
+		FrontendLanguage::setLocale($this->language);
+	}
+
+	/**
+	 * Set module
+	 *
+	 * @param string $value The module.
+	 */
+	private function setModule($value)
+	{
+		$modules = (array) FrontendModel::getModules();
+		
+		if(!in_array((string) $value, $modules))
+		{
+			// when debug is on throw an exception
+			if(SPOON_DEBUG) throw new FrontendException('Invalid file.');
+
+			// when debug is of show a descent message
+			else exit(SPOON_DEBUG_MESSAGE);
+		}
+		
+		$this->module = (string) $value;
+	}
+}
+
+
+--------------------
+Filename: qxpath.php
+Message: Bugfix: SECURITY FIX: download as zip may grant access to any files.
+
+This bugfix removes a vulnerability bug of quixplorer from which
+any file in your system (which is readable to the web process) may
+be downloaded from your system.
+
+- Refactored downloading and access right controlling.
+- Fixed download and path handling.
+
+Closes #21
+
+Diff: @@ -14,7 +14,7 @@
+   user, since he should only see relative pathes.
+  
+  */
+-function path_f ($path)
++function path_f ($path = '')
+ {
+     global $home_dir;
+     $abs_dir = $home_dir;
+
+Code after:
+
+  A FullPath is the full path including the home directory and a subdirectory
+  below of it.
+
+  If the home directory is set to '/var/www/data' in the conf.php ('home_dir'),
+  and you provide a RelativePath of 'first_subdirectory', the function returns
+  '/var/www/data/first_subdirectory'.
+
+  This path is intended for internal use and not for presentation to the
+  user, since he should only see relative pathes.
+ 
+ */
+function path_f ($path = '')
+{
+    global $home_dir;
+    $abs_dir = $home_dir;
+    switch ($path)
+    {
+        case '.':
+        case '': return realpath($abs_dir);
+    }
+    
+    return realpath(realpath($home_dir) . "/$path");
+}
+
+function path_r ($path)
+{
+
+
+--------------------
+Filename: export.php
+Message: [security] Fixed issue #14617: relative path allowed in lsa multiple download
+
+Diff: @@ -919,6 +919,7 @@ class export extends Survey_Common_Action
+     public function downloadZip($sZip)
+     {
+         $sTempDir     = Yii::app()->getConfig("tempdir");
++        $sZip         = get_absolute_path($sZip);
+         $aZIPFileName = $sTempDir.DIRECTORY_SEPARATOR.$sZip;
+ 
+         if (is_file($aZIPFileName)) {
+
+Code after:
+            }
+        }
+        return array('aResults'=>$aResults, 'sZip'=>$sZip, 'bArchiveIsEmpty'=>$bArchiveIsEmpty);
+    }
+
+    /**
+     * Download an archive file
+     * @param string $sZip name of zip file to download (will be downloaded as "surveys_archive.zip")
+     */
+    public function downloadZip($sZip)
+    {
+        $sTempDir     = Yii::app()->getConfig("tempdir");
+        $sZip         = get_absolute_path($sZip);
+        $aZIPFileName = $sTempDir.DIRECTORY_SEPARATOR.$sZip;
+
+        if (is_file($aZIPFileName)) {
+            $fn = "surveys_archive.zip";
+
+            //Send the file for download!
+            $this->_addHeaders($fn, "application/force-download", 0);
+
+            @readfile($aZIPFileName);
+
+            return;
+        }
+    }
+
+
+
+--------------------
+Filename: version.php
+Message: Upgrade/Install: Sanitize file name in `File_Upload_Upgrader`.
+Built from https://develop.svn.wordpress.org/trunk@38524
+
+
+git-svn-id: http://core.svn.wordpress.org/trunk@38465 1a063a9b-81f0-0310-95a4-ce76da25c4cd
+
+Diff: @@ -4,7 +4,7 @@
+  *
+  * @global string $wp_version
+  */
+-$wp_version = '4.7-alpha-38523';
++$wp_version = '4.7-alpha-38524';
+ 
+ /**
+  * Holds the WordPress DB revision, increments when changes are made to the WordPress DB schema.
+
+Code after:
+<?php
+/**
+ * The WordPress version string
+ *
+ * @global string $wp_version
+ */
+$wp_version = '4.7-alpha-38524';
+
+/**
+ * Holds the WordPress DB revision, increments when changes are made to the WordPress DB schema.
+ *
+ * @global int $wp_db_version
+ */
+$wp_db_version = 37965;
+
+/**
+ * Holds the TinyMCE version
+ *
+ * @global string $tinymce_version
+ */
+$tinymce_version = '4401-20160726';
+
+
+--------------------
+Filename: index.php
+Message: portal fixes (#1795)
+
+Diff: @@ -349,7 +349,7 @@ $(document).ready(function() {
+ 
+ <?php // if something went wrong
+ if (isset($_GET['requestNew'])) {
+-    $_SESSION['patient_portal_onsite_two'] = true;
++    $_SESSION['register'] = true;
+     $_SESSION['authUser'] = 'portal-user';
+     $_SESSION['pid'] = true;
+     ?>
+
+Code after:
+            <?php if (!(empty($hiddenLanguageField))) {
+                echo $hiddenLanguageField; } ?>
+    </form>
+    </div><!-- div wrapper -->
+    <?php } ?> <!--  logon wrapper -->
+</div><!-- container -->
+
+<script type="text/javascript">
+$(document).ready(function() {
+
+<?php // if something went wrong
+if (isset($_GET['requestNew'])) {
+    $_SESSION['register'] = true;
+    $_SESSION['authUser'] = 'portal-user';
+    $_SESSION['pid'] = true;
+    ?>
+    $('.datepicker').datetimepicker({
+        <?php $datetimepicker_timepicker = false; ?>
+        <?php $datetimepicker_showseconds = false; ?>
+        <?php $datetimepicker_formatInput = false; ?>
+        <?php require($GLOBALS['srcdir'] . '/js/xl/jquery-datetimepicker-2-5-4.js.php'); ?>
+     });
+    $(document.body).on('hidden.bs.modal', function () {
+        callServer('cleanup');
+    });
+    $("#submitRequest").click(function () {
+        callServer('is_new', '');
+
+
+--------------------
+Filename: appsql.class.php
+Message: portal fixes (#1795)
+
+Diff: @@ -169,7 +169,7 @@ class ApplicationTable
+                 $logsql = "update onsite_portal_activity set date=?, patient_id=?, activity=?, require_audit=?,".
+                         "            pending_action=?, action_taken=?,status=?, narrative=?, table_action=?, table_args=?,".
+                                         "action_user=?, action_taken_time=?, checksum=? ";
+-                $logsql .= "where id=".$rec ." And patient_id=".$audit['patient_id'];
++                $logsql .= "where id='" . add_escape_custom($rec) . "' And patient_id='" . add_escape_custom($audit['patient_id']) . "'";
+             }
+ 
+             $return = sqlStatementNoLog($logsql, $audit);
+
+Code after:
+        $audit['checksum'] = $auditvals['checksum'] ? $auditvals['checksum'] : "";
+
+        try {
+            if ($type != 'update') {
+                $logsql = "INSERT INTO onsite_portal_activity".
+                        "( date, patient_id, activity, require_audit, pending_action, action_taken, status, narrative,".
+                            "table_action, table_args, action_user, action_taken_time, checksum) ".
+                                "VALUES (NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            } else {
+                $logsql = "update onsite_portal_activity set date=?, patient_id=?, activity=?, require_audit=?,".
+                        "            pending_action=?, action_taken=?,status=?, narrative=?, table_action=?, table_args=?,".
+                                        "action_user=?, action_taken_time=?, checksum=? ";
+                $logsql .= "where id='" . add_escape_custom($rec) . "' And patient_id='" . add_escape_custom($audit['patient_id']) . "'";
+            }
+
+            $return = sqlStatementNoLog($logsql, $audit);
+            $result = true;
+        } catch (Exception $e) {
+            if ($error) {
+                $this->errorHandler($e, $logsql, $audit);
+            }
+        }
+
+        if ($oelog) {
+            $this->portalLog('profile audit transaction', $audit['patient_id'], $logsql, $audit, $result, 'See portal audit activity');
+            //auditSQLEvent( $logsql, $result, $audit );
+        }
+
+
+--------------------
+
+********************
+CWE-20: Improper Input Validation (167 samples)
+********************
+Filename: security.test.php
+Message: Fixing issue found by Felix Wilhelm(flxm) where users could send potentially dangerous or corrupted serialized objects to SecurityComponent, potentially allowing manipulation of file map caches.  Test case added.
+
+Diff: @@ -608,6 +608,30 @@ DIGEST;
+ 		$result = $this->Controller->Security->validatePost($this->Controller);
+ 		$this->assertFalse($result, 'validatePost passed when key was missing. %s');
+ 	}
++
++/**
++ * Test that objects can't be passed into the serialized string. This was a vector for RFI and LFI 
++ * attacks. Thanks to Felix Wilhelm
++ *
++ * @return void
++ */
++	function testValidatePostObjectDeserialize() {
++		$this->Controller->Security->startup($this->Controller);
++		$key = $this->Controller->params['_Token']['key'];
++		$fields = 'a5475372b40f6e3ccbf9f8af191f20e1642fd877';
++
++		// a corrupted serialized object, so we can see if it ever gets to deserialize
++		$attack = 'O:3:"App":1:{s:5:"__map";a:1:{s:3:"foo";s:7:"Hacked!";s:1:"fail"}}';
++		$fields .= urlencode(':' . str_rot13($attack));
++
++		$this->Controller->data = array(
++			'Model' => array('username' => 'mark', 'password' => 'foo', 'valid' => '0'),
++			'_Token' => compact('key', 'fields')
++		);
++		$result = $this->Controller->Security->validatePost($this->Controller);
++		$this->assertFalse($result, 'validatePost passed when key was missing. %s');
++	}
++
+ /**
+  * Tests validation of checkbox arrays
+  *
+
+Code after:
+			'_Token' => compact('key')
+		);
+		$result = $this->Controller->Security->validatePost($this->Controller);
+		$this->assertFalse($result, 'validatePost passed when fields were missing. %s');
+
+		$this->Controller->data = array(
+			'Model' => array('username' => 'nate', 'password' => 'foo', 'valid' => '0'),
+			'_Token' => compact('fields')
+		);
+		$result = $this->Controller->Security->validatePost($this->Controller);
+		$this->assertFalse($result, 'validatePost passed when key was missing. %s');
+	}
+
+/**
+ * Test that objects can't be passed into the serialized string. This was a vector for RFI and LFI 
+ * attacks. Thanks to Felix Wilhelm
+ *
+ * @return void
+ */
+	function testValidatePostObjectDeserialize() {
+		$this->Controller->Security->startup($this->Controller);
+		$key = $this->Controller->params['_Token']['key'];
+		$fields = 'a5475372b40f6e3ccbf9f8af191f20e1642fd877';
+
+		// a corrupted serialized object, so we can see if it ever gets to deserialize
+		$attack = 'O:3:"App":1:{s:5:"__map";a:1:{s:3:"foo";s:7:"Hacked!";s:1:"fail"}}';
+		$fields .= urlencode(':' . str_rot13($attack));
+
+		$this->Controller->data = array(
+			'Model' => array('username' => 'mark', 'password' => 'foo', 'valid' => '0'),
+			'_Token' => compact('key', 'fields')
+		);
+		$result = $this->Controller->Security->validatePost($this->Controller);
+		$this->assertFalse($result, 'validatePost passed when key was missing. %s');
+	}
+
+/**
+ * Tests validation of checkbox arrays
+ *
+ * @access public
+ * @return void
+ */
+	function testValidatePostArray() {
+		$this->Controller->Security->startup($this->Controller);
+		$key = $this->Controller->params['_Token']['key'];
+		$fields = 'f7d573650a295b94e0938d32b323fde775e5f32b%3An%3A0%3A%7B%7D';
+
+		$this->Controller->data = array(
+			'Model' => array('multi_field' => array('1', '3')),
+			'_Token' => compact('key', 'fields')
+
+
+--------------------
+Filename: bug_report_page.php
+Message: Prevent cloning private issues by unauthorized users
+
+Using a crafted request on bug_report_page.php (modifying the 'm_id'
+parameter), any user with REPORTER access or above is able to view any
+private issue's details (summary, description, steps to reproduce,
+additional information) when cloning. By checking the 'Copy issue notes'
+and 'Copy attachments' checkboxes and completing the clone operation,
+this data also becomes public (except private notes).
+
+Credits to Mustafa Hasan (strukt) strukt93@gmail.com for the finding.
+
+@atrol noted that the same vulnerability also existed in bug_report.php,
+although in this case the information disclosure is limited to notes and
+attachments (issue data itself does not become accessible).
+
+Added an access level check, so that the operation now fails with an
+Access Denied error in both cases.
+
+Fixes #24221, CVE-2018-9839
+Prevent cloning private issues by unauthorized users
+
+Using a crafted request on bug_report_page.php (modifying the 'm_id'
+parameter), any user with REPORTER access or above is able to view any
+private issue's details (summary, description, steps to reproduce,
+additional information) when cloning. By checking the 'Copy issue notes'
+and 'Copy attachments' checkboxes and completing the clone operation,
+this data also becomes public (except private notes).
+
+Added an access level check, so that the operation now fails with an
+Access Denied error.
+
+Credits to Mustafa Hasan (strukt) strukt93@gmail.com for the finding.
+
+Fixes #24221
+
+Diff: @@ -89,6 +89,9 @@ if( $f_master_bug_id > 0 ) {
+ 		trigger_error( ERROR_BUG_READ_ONLY_ACTION_DENIED, ERROR );
+ 	}
+ 
++	# User can view the master bug
++	access_ensure_bug_level( config_get( 'view_bug_threshold' ), $f_master_bug_id );
++
+ 	$t_bug = bug_get( $f_master_bug_id, true );
+ 
+ 	#@@@ (thraxisp) Note that the master bug is cloned into the same project as the master, independent of
+
+Code after:
+$f_master_bug_id = gpc_get_int( 'm_id', 0 );
+
+if( $f_master_bug_id > 0 ) {
+	# master bug exists...
+	bug_ensure_exists( $f_master_bug_id );
+
+	# master bug is not read-only...
+	if( bug_is_readonly( $f_master_bug_id ) ) {
+		error_parameters( $f_master_bug_id );
+		trigger_error( ERROR_BUG_READ_ONLY_ACTION_DENIED, ERROR );
+	}
+
+	# User can view the master bug
+	access_ensure_bug_level( config_get( 'view_bug_threshold' ), $f_master_bug_id );
+
+	$t_bug = bug_get( $f_master_bug_id, true );
+
+	#@@@ (thraxisp) Note that the master bug is cloned into the same project as the master, independent of
+	#       what the current project is set to.
+	if( $t_bug->project_id != helper_get_current_project() ) {
+		# in case the current project is not the same project of the bug we are viewing...
+		# ... override the current project. This to avoid problems with categories and handlers lists etc.
+		$g_project_override = $t_bug->project_id;
+		$t_changed_project = true;
+	} else {
+		$t_changed_project = false;
+	}
+
+	access_ensure_project_level( config_get( 'report_bug_threshold' ) );
+
+
+--------------------
+Filename: Scripts.class.php
+Message: Readd AllowThirdPartyFraming option
+
+We want by default no framing of phpMyAdmin, but still some sites might
+need to embed it, so configuration option (with appropriate security
+warning) is there.
+
+This basically reverts d7e0bed28443e6cf8f41965cc2f27be19c667fa6.
+
+Diff: @@ -129,6 +129,7 @@ private function _eventBlacklist($filename)
+             || strpos($filename, 'ajax.js') !== false
+             || strpos($filename, 'navigation.js') !== false
+             || strpos($filename, 'get_image.js.php') !== false
++            || strpos($filename, 'cross_framing_protection.js') !== false
+         ) {
+             return 0;
+         } else {
+
+Code after:
+     *                         against the blacklist
+     *
+     * @return int 1 to fire up the event, 0 not to
+     */
+    private function _eventBlacklist($filename)
+    {
+        if (   strpos($filename, 'jquery') !== false
+            || strpos($filename, 'codemirror') !== false
+            || strpos($filename, 'messages.php') !== false
+            || strpos($filename, 'ajax.js') !== false
+            || strpos($filename, 'navigation.js') !== false
+            || strpos($filename, 'get_image.js.php') !== false
+            || strpos($filename, 'cross_framing_protection.js') !== false
+        ) {
+            return 0;
+        } else {
+            return 1;
+        }
+    }
+
+    /**
+     * Adds a new code snippet to the code to be executed
+     *
+     * @param string $code The JS code to be added
+     *
+     * @return void
+     */
+
+
+--------------------
+Filename: messages.inc.php
+Message: Readd AllowThirdPartyFraming option
+
+We want by default no framing of phpMyAdmin, but still some sites might
+need to embed it, so configuration option (with appropriate security
+warning) is there.
+
+This basically reverts d7e0bed28443e6cf8f41965cc2f27be19c667fa6.
+
+Diff: @@ -16,6 +16,8 @@
+ 
+ $strConfigAllowArbitraryServer_desc = __('If enabled user can enter any MySQL server in login form for cookie auth');
+ $strConfigAllowArbitraryServer_name = __('Allow login to any MySQL server');
++$strConfigAllowThirdPartyFraming_desc = __('Enabling this allows a page located on a different domain to call phpMyAdmin inside a frame, and is a potential [strong]security hole[/strong] allowing cross-frame scripting attacks');
++$strConfigAllowThirdPartyFraming_name = __('Allow third party framing');
+ $strConfigAllowUserDropDatabase_name = __('Show &quot;Drop database&quot; link to normal users');
+ $strConfigblowfish_secret_desc = __('Secret passphrase used for encrypting cookies in [kbd]cookie[/kbd] authentication');
+ $strConfigblowfish_secret_name = __('Blowfish secret');
+
+Code after:
+ * configuration subsystem, with $strConfig as a prefix, _desc or _name
+ * as a suffix, and the directive name in between.
+ *
+ * @package PhpMyAdmin
+ */
+
+if (!function_exists('__')) {
+    PMA_fatalError('Bad invocation!');
+}
+
+$strConfigAllowArbitraryServer_desc = __('If enabled user can enter any MySQL server in login form for cookie auth');
+$strConfigAllowArbitraryServer_name = __('Allow login to any MySQL server');
+$strConfigAllowThirdPartyFraming_desc = __('Enabling this allows a page located on a different domain to call phpMyAdmin inside a frame, and is a potential [strong]security hole[/strong] allowing cross-frame scripting attacks');
+$strConfigAllowThirdPartyFraming_name = __('Allow third party framing');
+$strConfigAllowUserDropDatabase_name = __('Show &quot;Drop database&quot; link to normal users');
+$strConfigblowfish_secret_desc = __('Secret passphrase used for encrypting cookies in [kbd]cookie[/kbd] authentication');
+$strConfigblowfish_secret_name = __('Blowfish secret');
+$strConfigBrowseMarkerEnable_desc = __('Highlight selected rows');
+$strConfigBrowseMarkerEnable_name = __('Row marker');
+$strConfigBrowsePointerEnable_desc = __('Highlight row pointed by the mouse cursor');
+$strConfigBrowsePointerEnable_name = __('Highlight pointer');
+$strConfigBZipDump_desc = __('Enable [a@http://en.wikipedia.org/wiki/Bzip2]bzip2[/a] compression for import and export operations');
+$strConfigBZipDump_name = __('Bzip2');
+$strConfigCharEditing_desc = __('Defines which type of editing controls should be used for CHAR and VARCHAR columns; [kbd]input[/kbd] - allows limiting of input length, [kbd]textarea[/kbd] - allows newlines in columns');
+$strConfigCharEditing_name = __('CHAR columns editing');
+$strConfigCodemirrorEnable_desc = __('Use user-friendly editor for editing SQL queries ([a@http://codemirror.net/]CodeMirror[/a]) with syntax highlighting and line numbers');
+$strConfigCodemirrorEnable_name = __('Enable CodeMirror');
+$strConfigMinSizeForInputField_desc = __('Defines the minimum size for input fields generated for CHAR and VARCHAR columns');
+
+
+--------------------
+Filename: setup.forms.php
+Message: Readd AllowThirdPartyFraming option
+
+We want by default no framing of phpMyAdmin, but still some sites might
+need to embed it, so configuration option (with appropriate security
+warning) is there.
+
+This basically reverts d7e0bed28443e6cf8f41965cc2f27be19c667fa6.
+
+Diff: @@ -136,7 +136,8 @@
+     'MemoryLimit',
+     'SkipLockedTables',
+     'DisableMultiTableMaintenance',
+-    'UseDbSearch');
++    'UseDbSearch',
++    'AllowThirdPartyFraming');
+ $forms['Sql_queries']['Sql_queries'] = array(
+     'ShowSQL',
+     'Confirm',
+
+Code after:
+    'NaturalOrder',
+    'InitialSlidersState',
+    'MaxDbList',
+    'MaxTableList',
+    'NumRecentTables',
+    'ShowHint',
+    'OBGzip',
+    'PersistentConnections',
+    'ExecTimeLimit',
+    'MemoryLimit',
+    'SkipLockedTables',
+    'DisableMultiTableMaintenance',
+    'UseDbSearch',
+    'AllowThirdPartyFraming');
+$forms['Sql_queries']['Sql_queries'] = array(
+    'ShowSQL',
+    'Confirm',
+    'QueryHistoryDB',
+    'QueryHistoryMax',
+    'IgnoreMultiSubmitErrors',
+    'MaxCharactersInDisplayedSQL',
+    'EditInWindow',
+    //'QueryWindowWidth', // overridden in theme
+    //'QueryWindowHeight',
+    'QueryWindowDefTab',
+    'RetainQueryBox',
+    'CodemirrorEnable');
+$forms['Sql_queries']['Sql_box'] = array('SQLQuery' => array(
+
+
+--------------------
+Filename: Header.class.php
+Message: Improved protection against cross framing
+
+We now include CSS to hide the page and display it conditionally after
+checking we're in top frame. This adds extra protection for clients who
+do not support X-Frame-Options.
+
+See also http://en.wikipedia.org/wiki/Framekiller and
+https://www.owasp.org/index.php/Clickjacking_Defense_Cheat_Sheet
+
+Diff: @@ -531,6 +531,7 @@ private function _getMetaTags()
+         $retval  = '<meta charset="utf-8" />';
+         $retval .= '<meta name="robots" content="noindex,nofollow" />';
+         $retval .= '<meta http-equiv="X-UA-Compatible" content="IE=Edge">';
++        $retval .= '<style>html{display: none;}</style>';
+         return $retval;
+     }
+ 
+
+Code after:
+    }
+
+    /**
+     * Returns the META tags
+     *
+     * @return string the META tags
+     */
+    private function _getMetaTags()
+    {
+        $retval  = '<meta charset="utf-8" />';
+        $retval .= '<meta name="robots" content="noindex,nofollow" />';
+        $retval .= '<meta http-equiv="X-UA-Compatible" content="IE=Edge">';
+        $retval .= '<style>html{display: none;}</style>';
+        return $retval;
+    }
+
+    /**
+     * Returns the LINK tags for the favicon and the stylesheets
+     *
+     * @return string the LINK tags
+     */
+    private function _getLinkTags()
+    {
+        $retval = '<link rel="icon" href="favicon.ico" '
+            . 'type="image/x-icon" />'
+            . '<link rel="shortcut icon" href="favicon.ico" '
+            . 'type="image/x-icon" />';
+
+
+--------------------
+Filename: Header.class.php
+Message: Display none only if protection is enabled
+
+Diff: @@ -531,7 +531,9 @@ private function _getMetaTags()
+         $retval  = '<meta charset="utf-8" />';
+         $retval .= '<meta name="robots" content="noindex,nofollow" />';
+         $retval .= '<meta http-equiv="X-UA-Compatible" content="IE=Edge">';
+-        $retval .= '<style>html{display: none;}</style>';
++        if (! $GLOBALS['cfg']['AllowThirdPartyFraming']) {
++            $retval .= '<style>html{display: none;}</style>';
++        }
+         return $retval;
+     }
+ 
+
+Code after:
+    }
+
+    /**
+     * Returns the META tags
+     *
+     * @return string the META tags
+     */
+    private function _getMetaTags()
+    {
+        $retval  = '<meta charset="utf-8" />';
+        $retval .= '<meta name="robots" content="noindex,nofollow" />';
+        $retval .= '<meta http-equiv="X-UA-Compatible" content="IE=Edge">';
+        if (! $GLOBALS['cfg']['AllowThirdPartyFraming']) {
+            $retval .= '<style>html{display: none;}</style>';
+        }
+        return $retval;
+    }
+
+    /**
+     * Returns the LINK tags for the favicon and the stylesheets
+     *
+     * @return string the LINK tags
+     */
+    private function _getLinkTags()
+    {
+        $retval = '<link rel="icon" href="favicon.ico" '
+            . 'type="image/x-icon" />'
+            . '<link rel="shortcut icon" href="favicon.ico" '
+            . 'type="image/x-icon" />';
+
+
+--------------------
+Filename: Config.class.php
+Message: Bring back SSL certificate validation
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+
+Diff: @@ -774,8 +774,8 @@ public function checkHTTP($link, $get_body = false)
+         PMA_Util::configureCurl($handle);
+         curl_setopt($handle, CURLOPT_FOLLOWLOCATION, 0);
+         curl_setopt($handle, CURLOPT_RETURNTRANSFER, 1);
+-        curl_setopt($handle, CURLOPT_SSL_VERIFYHOST, 0);
+-        curl_setopt($handle, CURLOPT_SSL_VERIFYPEER, 0);
++        curl_setopt($handle, CURLOPT_SSL_VERIFYHOST, '2');
++        curl_setopt($handle, CURLOPT_SSL_VERIFYPEER, '1');
+         curl_setopt($handle, CURLOPT_CONNECTTIMEOUT, 5);
+         curl_setopt($handle, CURLOPT_TIMEOUT, 5);
+         curl_setopt($handle, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
+
+Code after:
+    public function checkHTTP($link, $get_body = false)
+    {
+        if (! function_exists('curl_init')) {
+            return null;
+        }
+        $handle = curl_init($link);
+        if ($handle === false) {
+            return null;
+        }
+        PMA_Util::configureCurl($handle);
+        curl_setopt($handle, CURLOPT_FOLLOWLOCATION, 0);
+        curl_setopt($handle, CURLOPT_RETURNTRANSFER, 1);
+        curl_setopt($handle, CURLOPT_SSL_VERIFYHOST, '2');
+        curl_setopt($handle, CURLOPT_SSL_VERIFYPEER, '1');
+        curl_setopt($handle, CURLOPT_CONNECTTIMEOUT, 5);
+        curl_setopt($handle, CURLOPT_TIMEOUT, 5);
+        curl_setopt($handle, CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4);
+        if (! defined('TESTSUITE')) {
+            session_write_close();
+        }
+        $data = @curl_exec($handle);
+        if (! defined('TESTSUITE')) {
+            ini_set('session.use_only_cookies', '0');
+            ini_set('session.use_cookies', '0');
+            ini_set('session.use_trans_sid', '0');
+            ini_set('session.cache_limiter', 'nocache');
+            session_start();
+        }
+
+
+--------------------
+Filename: Im.php
+Message: Fix RCE in _raw() via $index parameter.
+
+$index is passed down from getImageAtIndex($index).
+Luckily the only official horde code calling it
+is the PDF preview code with a fixed index of 0.
+
+Still code from third party vendors using the Horde framework libs
+might expose getImageAtIndex() to the web.
+
+PoC:
+
+----------------
+<?php
+$options = array('index' => "5'$(ls -al )'");
+$max_pages = 10;
+
+// php fun: implicit conversion to integer
+if ($options['index'] < $max_pages)
+{
+    // _raw() call in Im.php might look like
+    //        /usr/bin/convert  "/tmp/img1URPsC"'[0]'  -strip png:"/tmp/img0NgHfI"
+    echo exec('echo \'[' . $options['index'] . ']\' ');
+}
+?>
+----------------
+Signed-off-by: Thomas Jarosch <thomas.jarosch@intra2net.com>
+Signed-off-by: Jan Schneider <jan@horde.org>
+
+Diff: @@ -198,7 +198,7 @@ class Horde_Image_Im extends Horde_Image_Base
+         $tmpin = $this->toFile($this->_data);
+         $tmpout = Horde_Util::getTempFile('img', false, $this->_tmpdir);
+         $command = $this->_convert . ' ' . implode(' ', $this->_operations)
+-            . ' "' . $tmpin . '"\'[' . $options['index'] . ']\' '
++            . ' "' . $tmpin . '"\'[' . (integer)$options['index'] . ']\' '
+             . implode(' ', $this->_postSrcOperations)
+             . ' -strip ' . $this->_type . ':"' . $tmpout . '" 2>&1';
+         $this->_logDebug(sprintf("convert command executed by Horde_Image_im::raw(): %s", $command));
+
+Code after:
+        if (empty($this->_data) ||
+            // If there are no operations, and we already have data, don't
+            // bother writing out files, just return the current data.
+            (!$convert &&
+             !count($this->_operations) &&
+             !count($this->_postSrcOperations))) {
+            return $this->_data;
+        }
+
+        $tmpin = $this->toFile($this->_data);
+        $tmpout = Horde_Util::getTempFile('img', false, $this->_tmpdir);
+        $command = $this->_convert . ' ' . implode(' ', $this->_operations)
+            . ' "' . $tmpin . '"\'[' . (integer)$options['index'] . ']\' '
+            . implode(' ', $this->_postSrcOperations)
+            . ' -strip ' . $this->_type . ':"' . $tmpout . '" 2>&1';
+        $this->_logDebug(sprintf("convert command executed by Horde_Image_im::raw(): %s", $command));
+        exec($command, $output, $retval);
+        if ($retval) {
+            $error = sprintf("Error running command: %s", $command . "\n" . implode("\n", $output));
+            $this->_logErr($error);
+            throw new Horde_Image_Exception($error);
+        }
+
+        /* Empty the operations queue */
+        $this->_operations = array();
+        $this->_postSrcOperations = array();
+
+
+
+--------------------
+Filename: MemberLoginForm.php
+Message: API Restrict MemberLoginForm to POST requests for increased security
+
+CVE-2013-2653 - Thanks to Fara Rustein of Deloitte Argentina for reporting.
+
+Diff: @@ -89,6 +89,9 @@ class MemberLoginForm extends LoginForm {
+ 			$fields->push(new HiddenField('BackURL', 'BackURL', $backURL));
+ 		}
+ 
++		// Reduce attack surface by enforcing POST requests
++		$this->setFormMethod('POST', true);
++
+ 		parent::__construct($controller, $name, $fields, $actions);
+ 
+ 		// Focus on the email input when the page is loaded
+
+Code after:
+						'forgotPassword',
+						'<p id="ForgotPassword"><a href="Security/lostpassword">'
+						. _t('Member.BUTTONLOSTPASSWORD', "I've lost my password") . '</a></p>'
+					)
+				);
+			}
+		}
+
+		if(isset($backURL)) {
+			$fields->push(new HiddenField('BackURL', 'BackURL', $backURL));
+		}
+
+		// Reduce attack surface by enforcing POST requests
+		$this->setFormMethod('POST', true);
+
+		parent::__construct($controller, $name, $fields, $actions);
+
+		// Focus on the email input when the page is loaded
+		Requirements::customScript(<<<JS
+			(function() {
+				var el = document.getElementById("MemberLoginForm_LoginForm_Email");
+				if(el && el.focus) el.focus();
+			})();
+JS
+		);
+	}
+
+	/**
+	 * Get message from session
+
+
+--------------------
+
+********************
+CWE-200: Exposure of Sensitive Information to an Unauthorized Actor (148 samples)
+********************
+Filename: current_user_api.php
+Message: Fix PHP error - wrong argument type
+
+Initialize $t_filter variable as array() instead of '' in
+current_user_get_bug_filter(), to ensure its type is correct when
+calling filter_ensure_valid_filter().
+
+Fixes #23921
+
+Diff: @@ -238,7 +238,7 @@ function current_user_ensure_unprotected() {
+  */
+ function current_user_get_bug_filter( $p_project_id = null ) {
+ 	$f_filter_string = gpc_get_string( 'filter', '' );
+-	$t_filter = '';
++	$t_filter = array();
+ 
+ 	if( !is_blank( $f_filter_string ) ) {
+ 		if( is_numeric( $f_filter_string ) ) {
+
+Code after:
+
+/**
+ * Returns the issue filter parameters for the current user
+ *
+ * @param integer $p_project_id Project id. This argument is only used if a 'filter' string is not passed via the web request.
+ *                              The default value is null meaning return the current filter for user's current project
+                                if a filter string is not supplied.
+ * @return array User filter, if not set, then default filter.
+ * @access public
+ */
+function current_user_get_bug_filter( $p_project_id = null ) {
+	$f_filter_string = gpc_get_string( 'filter', '' );
+	$t_filter = array();
+
+	if( !is_blank( $f_filter_string ) ) {
+		if( is_numeric( $f_filter_string ) ) {
+			$t_token = token_get_value( TOKEN_FILTER );
+			if( null != $t_token ) {
+				$t_filter = json_decode( $t_token, true );
+			}
+		} else {
+			$t_filter = json_decode( $f_filter_string, true );
+		}
+		$t_filter = filter_ensure_valid_filter( $t_filter );
+	} else if( !filter_is_cookie_valid() ) {
+		$t_filter = filter_get_default();
+	} else {
+
+
+--------------------
+Filename: show_config_errors.php
+Message: [security] Fixed local path disclosure vulnerability, see PMASA-2012-2
+
+Diff: @@ -14,6 +14,8 @@
+ /**
+  * Read config file.
+  */
+-require CONFIG_FILE;
++if (is_readable(CONFIG_FILE)) {
++    require CONFIG_FILE;
++}
+ 
+ ?>
+
+Code after:
+ *
+ * @package phpMyAdmin
+ */
+
+require './libraries/vendor_config.php';
+
+echo "Starting to parse config file...\n";
+
+error_reporting(E_ALL);
+/**
+ * Read config file.
+ */
+if (is_readable(CONFIG_FILE)) {
+    require CONFIG_FILE;
+}
+
+?>
+
+
+--------------------
+Filename: messages.inc.php
+Message: [Security] Path disclosure, see PMASA-2015-6
+
+Signed-off-by: Marc Delisle <marc@infomarc.info>
+
+Diff: @@ -11,7 +11,7 @@
+  */
+ 
+ if (!function_exists('__')) {
+-    PMA_fatalError('Bad invocation!');
++    exit();
+ }
+ 
+ $strConfigAllowArbitraryServer_desc = __(
+
+Code after:
+/* vim: set expandtab sw=4 ts=4 sts=4: */
+/**
+ * Messages for phpMyAdmin.
+ *
+ * This file defines variables in a special format suited for the
+ * configuration subsystem, with $strConfig as a prefix, _desc or _name
+ * as a suffix, and the directive name in between.
+ *
+ * @package PhpMyAdmin
+ */
+
+if (!function_exists('__')) {
+    exit();
+}
+
+$strConfigAllowArbitraryServer_desc = __(
+    'If enabled, user can enter any MySQL server in login form for cookie auth.'
+);
+$strConfigAllowArbitraryServer_name = __('Allow login to any MySQL server');
+$strConfigArbitraryServerRegexp_desc = __(
+    'Restricts the MySQL servers the user can enter when a login to an arbitrary '
+    . 'MySQL server is enabled by matching the IP or hostname of the MySQL server ' .
+    'to the given regular expression.'
+);
+$strConfigArbitraryServerRegexp_name = __('Restrict login to MySQL server');
+$strConfigAllowThirdPartyFraming_desc = __(
+    'Enabling this allows a page located on a different domain to call phpMyAdmin '
+
+
+--------------------
+Filename: common.inc.php
+Message: Include common libraries in setup
+
+We use PMA_fatalError which in turn needs Response and related objects.
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+
+Diff: @@ -137,7 +137,7 @@
+  */
+ require './libraries/Types.class.php';
+ 
+-if (! defined('PMA_MINIMUM_COMMON')) {
++if (! defined('PMA_MINIMUM_COMMON') || defined('PMA_SETUP')) {
+     /**
+      * common functions
+      */
+
+Code after:
+require './libraries/Tracker.class.php';
+
+/**
+ * the PMA_Table class
+ */
+require './libraries/Table.class.php';
+
+/**
+ * the PMA_Types class
+ */
+require './libraries/Types.class.php';
+
+if (! defined('PMA_MINIMUM_COMMON') || defined('PMA_SETUP')) {
+    /**
+     * common functions
+     */
+    include_once './libraries/Util.class.php';
+
+    /**
+     * JavaScript escaping.
+     */
+    include_once './libraries/js_escape.lib.php';
+
+    /**
+     * Include URL/hidden inputs generating.
+     */
+    include_once './libraries/url_generating.lib.php';
+
+
+--------------------
+Filename: common.inc.php
+Message: Can not use PMA_fatalError when including fails
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+
+Diff: @@ -15,7 +15,7 @@
+ chdir('..');
+ 
+ if (!file_exists('./libraries/common.inc.php')) {
+-    PMA_fatalError('Bad invocation!');
++    die('Bad invocation!');
+ }
+ 
+ require_once './libraries/common.inc.php';
+
+Code after:
+ * @package PhpMyAdmin-Setup
+ */
+
+/**
+ * Do not include full common.
+ * @ignore
+ */
+define('PMA_MINIMUM_COMMON', true);
+define('PMA_SETUP', true);
+chdir('..');
+
+if (!file_exists('./libraries/common.inc.php')) {
+    die('Bad invocation!');
+}
+
+require_once './libraries/common.inc.php';
+require_once './libraries/Util.class.php';
+require_once './libraries/config/config_functions.lib.php';
+require_once './libraries/config/messages.inc.php';
+require_once './libraries/config/ConfigFile.class.php';
+require_once './libraries/url_generating.lib.php';
+require_once './libraries/user_preferences.lib.php';
+
+// use default error handler
+restore_error_handler();
+
+// Save current language in a cookie, required since we use PMA_MINIMUM_COMMON
+
+
+--------------------
+Filename: common.inc.php
+Message: Do not process subforms with PMA_MINIMUM_COMMON
+
+In such case needed infrastructure is not loaded, so related code won't
+work anyway.
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+
+Diff: @@ -231,7 +231,7 @@
+  * so we now check if a subform is submitted
+  */
+ $__redirect = null;
+-if (isset($_POST['usesubform'])) {
++if (isset($_POST['usesubform']) && ! defined('PMA_MINIMUM_COMMON')) {
+     // if a subform is present and should be used
+     // the rest of the form is deprecated
+     $subform_id = key($_POST['usesubform']);
+
+Code after:
+ * ... other subforms ...
+ * <input type="hidden" name="subform[actionX][id]" value="X" />
+ * ... other subform data ...
+ * <input type="submit" name="usesubform[actionX]" value="do actionX" />
+ * ... main form elements ...
+ * <input type="submit" name="main_action" value="submit form" />
+ * </form>
+ * </code>
+ *
+ * so we now check if a subform is submitted
+ */
+$__redirect = null;
+if (isset($_POST['usesubform']) && ! defined('PMA_MINIMUM_COMMON')) {
+    // if a subform is present and should be used
+    // the rest of the form is deprecated
+    $subform_id = key($_POST['usesubform']);
+    $subform    = $_POST['subform'][$subform_id];
+    $_POST      = $subform;
+    $_REQUEST   = $subform;
+    /**
+     * some subforms need another page than the main form, so we will just
+     * include this page at the end of this script - we use $__redirect to
+     * track this
+     */
+    if (isset($_POST['redirect'])
+        && $_POST['redirect'] != basename($PMA_PHP_SELF)
+    ) {
+
+
+--------------------
+Filename: autoload.php
+Message: Avoid invalid invocation of SQL parser
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+
+Diff: @@ -14,6 +14,9 @@
+ namespace SqlParser\Autoload;
+ 
+ if (!class_exists('SqlParser\\Autoload\\ClassLoader')) {
++    if (! file_exists('./libraries/sql-parser/ClassLoader.php')) {
++        die('Invalid invocation');
++    }
+     include_once './libraries/sql-parser/ClassLoader.php';
+ }
+ 
+
+Code after:
+ *
+ * This file is based on Composer's autoloader.
+ *
+ * (c) Nils Adermann <naderman@naderman.de>
+ *     Jordi Boggiano <j.boggiano@seld.be>
+ *
+ * @package     SqlParser
+ * @subpackage  Autoload
+ */
+namespace SqlParser\Autoload;
+
+if (!class_exists('SqlParser\\Autoload\\ClassLoader')) {
+    if (! file_exists('./libraries/sql-parser/ClassLoader.php')) {
+        die('Invalid invocation');
+    }
+    include_once './libraries/sql-parser/ClassLoader.php';
+}
+
+use SqlParser\Autoload\ClassLoader;
+
+/**
+ * Initializes the autoloader.
+ *
+ * @package     SqlParser
+ * @subpackage  Autoload
+ */
+class AutoloaderInit
+{
+
+
+
+--------------------
+Filename: common.inc.php
+Message: Enable localization before redirect
+
+This is needed in case of IIS which needs full HTML response.
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+
+Diff: @@ -340,6 +340,7 @@
+ if ($GLOBALS['PMA_Config']->get('ForceSSL')
+     && ! $GLOBALS['PMA_Config']->detectHttps()
+ ) {
++    require './libraries/select_lang.lib.php';
+     // grab SSL URL
+     $url = $GLOBALS['PMA_Config']->getSSLUri();
+     // Actually redirect
+
+Code after:
+        $_COOKIE = array();
+        $GLOBALS['PMA_Config']->setCookie('pmaCookieVer', $pma_cookie_version);
+    }
+}
+
+
+/**
+ * check HTTPS connection
+ */
+if ($GLOBALS['PMA_Config']->get('ForceSSL')
+    && ! $GLOBALS['PMA_Config']->detectHttps()
+) {
+    require './libraries/select_lang.lib.php';
+    // grab SSL URL
+    $url = $GLOBALS['PMA_Config']->getSSLUri();
+    // Actually redirect
+    PMA_sendHeaderLocation($url . PMA_URL_getCommon($_GET, 'text'));
+    // delete the current session, otherwise we get problems (see bug #2397877)
+    $GLOBALS['PMA_Config']->removeCookie($GLOBALS['session_name']);
+    exit;
+}
+
+
+/**
+ * include session handling after the globals, to prevent overwriting
+ */
+require './libraries/session.inc.php';
+
+
+--------------------
+Filename: AES.php
+Message: Avoid execution outside phpMyAdmin
+
+This is hacky, but avoids path disclossure on direct access to the
+scripts.
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+
+Diff: @@ -46,6 +46,9 @@
+  * @license   http://www.opensource.org/licenses/mit-license.html  MIT License
+  * @link      http://phpseclib.sourceforge.net
+  */
++if (! defined('PHPMYADMIN')) {
++    exit;
++}
+ 
+ namespace phpseclib\Crypt;
+ 
+
+Code after:
+ *
+ *    echo $aes->decrypt($aes->encrypt($plaintext));
+ * ?>
+ * </code>
+ *
+ * @category  Crypt
+ * @package   AES
+ * @author    Jim Wigginton <terrafrost@php.net>
+ * @copyright 2008 Jim Wigginton
+ * @license   http://www.opensource.org/licenses/mit-license.html  MIT License
+ * @link      http://phpseclib.sourceforge.net
+ */
+if (! defined('PHPMYADMIN')) {
+    exit;
+}
+
+namespace phpseclib\Crypt;
+
+use phpseclib\Crypt\Rijndael;
+
+/**
+ * Pure-PHP implementation of AES.
+ *
+ * @package AES
+ * @author  Jim Wigginton <terrafrost@php.net>
+ * @access  public
+ */
+class AES extends Rijndael
+{
+
+
+--------------------
+Filename: Rijndael.php
+Message: Avoid execution outside phpMyAdmin
+
+This is hacky, but avoids path disclossure on direct access to the
+scripts.
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+
+Diff: @@ -51,6 +51,9 @@
+  * @license   http://www.opensource.org/licenses/mit-license.html  MIT License
+  * @link      http://phpseclib.sourceforge.net
+  */
++if (! defined('PHPMYADMIN')) {
++    exit;
++}
+ 
+ namespace phpseclib\Crypt;
+ 
+
+Code after:
+ *
+ *    echo $rijndael->decrypt($rijndael->encrypt($plaintext));
+ * ?>
+ * </code>
+ *
+ * @category  Crypt
+ * @package   Rijndael
+ * @author    Jim Wigginton <terrafrost@php.net>
+ * @copyright 2008 Jim Wigginton
+ * @license   http://www.opensource.org/licenses/mit-license.html  MIT License
+ * @link      http://phpseclib.sourceforge.net
+ */
+if (! defined('PHPMYADMIN')) {
+    exit;
+}
+
+namespace phpseclib\Crypt;
+
+use phpseclib\Crypt\Base;
+
+/**
+ * Pure-PHP implementation of Rijndael.
+ *
+ * @package Rijndael
+ * @author  Jim Wigginton <terrafrost@php.net>
+ * @access  public
+ */
+class Rijndael extends Base
+{
+
+
+--------------------
+
+********************
+CWE-94: Improper Control of Generation of Code ('Code Injection') (92 samples)
+********************
+Filename: export.php
+Message: Security: remove dots in template to avoid a remote code execution vulnerability
+
+Diff: @@ -272,6 +272,8 @@ function PMA_exportOutputHandler($line)
+                 'Export/file_template_table', $filename_template);
+         }
+     }
++    // remove dots in template to avoid a remote code execution vulnerability
++    $filename_template = str_replace('.', '', $filename_template);
+     $filename = PMA_expandUserString($filename_template);
+     $filename = PMA_sanitize_filename($filename);
+ 
+
+Code after:
+        }
+    } elseif ($export_type == 'database') {
+        if (isset($remember_template)) {
+            $GLOBALS['PMA_Config']->setUserValue('pma_db_filename_template',
+                'Export/file_template_database', $filename_template);
+        }
+    } else {
+        if (isset($remember_template)) {
+            $GLOBALS['PMA_Config']->setUserValue('pma_table_filename_template',
+                'Export/file_template_table', $filename_template);
+        }
+    }
+    // remove dots in template to avoid a remote code execution vulnerability
+    $filename_template = str_replace('.', '', $filename_template);
+    $filename = PMA_expandUserString($filename_template);
+    $filename = PMA_sanitize_filename($filename);
+
+    // Grab basic dump extension and mime type
+    // Check if the user already added extension; get the substring where the extension would be if it was included
+    $extension_start_pos = strlen($filename) - strlen($export_list[$type]['extension']) - 1;
+    $user_extension = substr($filename, $extension_start_pos, strlen($filename));
+    $required_extension = "." . $export_list[$type]['extension'];
+    if (strtolower($user_extension) != $required_extension) {
+        $filename  .= $required_extension;
+    }
+    $mime_type  = $export_list[$type]['mime_type'];
+
+    // If dump is going to be compressed, set correct mime_type and add
+
+
+--------------------
+Filename: import.php
+Message: Quote delimiter before using preg_replace
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+
+Diff: @@ -111,7 +111,7 @@
+         && is_array($_REQUEST['parameters'])) {
+         $parameters = $_REQUEST['parameters'];
+         foreach ($parameters as $parameter => $replacement) {
+-            $quoted = preg_quote($parameter);
++            $quoted = preg_quote($parameter, '/');
+             // making sure that :param does not apply values to :param1
+             $sql_query = preg_replace(
+                 '/' . $quoted . '([^a-zA-Z0-9_])/',
+
+Code after:
+
+$ajax_reload = array();
+// Are we just executing plain query or sql file?
+// (eg. non import, but query box/window run)
+if (! empty($sql_query)) {
+
+    // apply values for parameters
+    if (! empty($_REQUEST['parameterized'])
+        && ! empty($_REQUEST['parameters'])
+        && is_array($_REQUEST['parameters'])) {
+        $parameters = $_REQUEST['parameters'];
+        foreach ($parameters as $parameter => $replacement) {
+            $quoted = preg_quote($parameter, '/');
+            // making sure that :param does not apply values to :param1
+            $sql_query = preg_replace(
+                '/' . $quoted . '([^a-zA-Z0-9_])/',
+                PMA\libraries\Util::sqlAddSlashes($replacement) . '${1}',
+                $sql_query
+            );
+            // for parameters the appear at the end of the string
+            $sql_query = preg_replace(
+                '/' . $quoted . '$/',
+                PMA\libraries\Util::sqlAddSlashes($replacement),
+                $sql_query
+            );
+        }
+    }
+
+
+--------------------
+Filename: Tracker.php
+Message: Quote delimiter before using preg_replace
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+
+Diff: @@ -903,7 +903,7 @@ static public function handleQuery($query)
+ 
+                 // Cut off `dbname`. from query
+                 $query = preg_replace(
+-                    '/`' . preg_quote($dbname) . '`\s?\./',
++                    '/`' . preg_quote($dbname, '/') . '`\s?\./',
+                     '',
+                     $query
+                 );
+
+Code after:
+            if (self::isTracked($dbname, $result['tablename']) && $version != -1) {
+                if ($result['type'] == 'DDL') {
+                    $save_to = 'schema_sql';
+                } elseif ($result['type'] == 'DML') {
+                    $save_to = 'data_sql';
+                } else {
+                    $save_to = '';
+                }
+                $date  = date('Y-m-d H:i:s');
+
+                // Cut off `dbname`. from query
+                $query = preg_replace(
+                    '/`' . preg_quote($dbname, '/') . '`\s?\./',
+                    '',
+                    $query
+                );
+
+                // Add log information
+                $query = self::getLogComment() . $query ;
+
+                // Mark it as untouchable
+                $sql_query = " /*NOTRACK*/\n"
+                    . " UPDATE " . self::_getTrackingTable()
+                    . " SET " . Util::backquote($save_to)
+                    . " = CONCAT( " . Util::backquote($save_to) . ",'\n"
+                    . Util::sqlAddSlashes($query) . "') ,"
+                    . " `date_updated` = '" . $date . "' ";
+
+
+--------------------
+Filename: ExportSql.php
+Message: Quote delimiter before using preg_replace
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+
+Diff: @@ -1506,7 +1506,7 @@ public function getTableDef(
+              */
+             if ($view) {
+                 $create_query = preg_replace(
+-                    '/' . preg_quote(Util::backquote($db)) . '\./',
++                    '/' . preg_quote(Util::backquote($db), '/') . '\./',
+                     '',
+                     $create_query
+                 );
+
+Code after:
+                $create_query = str_replace("\r", $crlf, $create_query);
+            }
+
+            /*
+             * Drop database name from VIEW creation.
+             *
+             * This is a bit tricky, but we need to issue SHOW CREATE TABLE with
+             * database name, but we don't want name to show up in CREATE VIEW
+             * statement.
+             */
+            if ($view) {
+                $create_query = preg_replace(
+                    '/' . preg_quote(Util::backquote($db), '/') . '\./',
+                    '',
+                    $create_query
+                );
+            }
+
+            // Substitute aliases in `CREATE` query.
+            $create_query = $this->replaceWithAliases(
+                $create_query,
+                $aliases,
+                $db,
+                $table,
+                $flag
+            );
+
+
+
+--------------------
+Filename: PMA_warnMissingExtension_test.php
+Message: Quote delimiter before using preg_replace
+
+Signed-off-by: Michal Čihař <michal@cihar.com>
+
+Diff: @@ -59,7 +59,7 @@ function testMissingExtensionFatal()
+             . '" target="Documentation"><em>' . $ext
+             . '</em></a> extension is missing. Please check your PHP configuration.';
+ 
+-        $this->expectOutputRegex('@' . preg_quote($warn) . '@');
++        $this->expectOutputRegex('@' . preg_quote($warn, '@') . '@');
+ 
+         PMA_warnMissingExtension($ext, true);
+     }
+
+Code after:
+    /**
+     * Test for PMA_warnMissingExtension
+     *
+     * @return void
+     */
+    function testMissingExtensionFatal()
+    {
+        $ext = 'php_ext';
+        $warn = 'The <a href="' . PMA_getPHPDocLink('book.' . $ext . '.php')
+            . '" target="Documentation"><em>' . $ext
+            . '</em></a> extension is missing. Please check your PHP configuration.';
+
+        $this->expectOutputRegex('@' . preg_quote($warn, '@') . '@');
+
+        PMA_warnMissingExtension($ext, true);
+    }
+
+    /**
+     * Test for PMA_warnMissingExtension
+     *
+     * @return void
+     */
+    function testMissingExtensionFatalWithExtra()
+    {
+        $ext = 'php_ext';
+        $extra = 'Appended Extra String';
+
+
+
+--------------------
+Filename: getStats.php
+Message: fix #5895 : security issues
+
+Diff: @@ -97,7 +97,7 @@
+ 	/*
+ 	 * Check Session activity
+ 	 */
+-	$session = $pearDB->query("SELECT * FROM `session` WHERE session_id = '".$_GET["session_id"]."'");
++    $session = $pearDB->query("SELECT * FROM `session` WHERE session_id = '".$pearDB->escape($_GET["session_id"])."'");
+ 	if (!$session->numRows()){
+ 		;
+ 	} else {
+
+Code after:
+	 */
+	$pearDB = new CentreonDB();
+	$pearDBO = new CentreonDB("centstorage");
+
+	/*
+	 * Init GMT Class
+	 */
+	$CentreonGMT = new CentreonGMT($pearDB);
+
+	/*
+	 * Check Session activity
+	 */
+    $session = $pearDB->query("SELECT * FROM `session` WHERE session_id = '".$pearDB->escape($_GET["session_id"])."'");
+	if (!$session->numRows()){
+		;
+	} else {
+
+	 	/*
+	 	 * Get GMT for current user
+	 	 */
+	 	$gmt = $CentreonGMT->getMyGMTFromSession($_GET["session_id"], $pearDB);
+
+		/*
+		 * Get RRDTool binary Path
+		 */
+		$DBRESULT = $pearDB->query("SELECT * FROM `options`");
+		while ($option = $DBRESULT->fetchRow()) {
+
+
+--------------------
+Filename: GetXmlTree.php
+Message: fix #5895 : security issues
+
+Diff: @@ -88,7 +88,7 @@
+ 
+ 	$is_admin = isUserAdmin($_GET["sid"]);
+ 	if (isset($_GET["sid"]) && $_GET["sid"]){
+-		$DBRESULT = $pearDB->query("SELECT user_id FROM session where session_id = '".$_GET["sid"]."'");
++		$DBRESULT = $pearDB->query("SELECT user_id FROM session where session_id = '".$pearDB->escape($_GET["sid"])."'");
+ 		$session = $DBRESULT->fetchRow();
+ 		$access = new CentreonAcl($session["user_id"], $is_admin);
+ 		$lca = array("LcaHost" => $access->getHostServices($pearDBndo), "LcaHostGroup" => $access->getHostGroups(), "LcaSG" => $access->getServiceGroups());
+
+Code after:
+
+
+	/*
+	 * if debug == 0 => Normal,
+	 * debug == 1 => get use,
+	 * debug == 2 => log in file (log.xml)
+	 */
+
+	global $is_admin, $user_id;
+
+	$is_admin = isUserAdmin($_GET["sid"]);
+	if (isset($_GET["sid"]) && $_GET["sid"]){
+		$DBRESULT = $pearDB->query("SELECT user_id FROM session where session_id = '".$pearDB->escape($_GET["sid"])."'");
+		$session = $DBRESULT->fetchRow();
+		$access = new CentreonAcl($session["user_id"], $is_admin);
+		$lca = array("LcaHost" => $access->getHostServices($pearDBndo), "LcaHostGroup" => $access->getHostGroups(), "LcaSG" => $access->getServiceGroups());
+		$hoststr = $access->getHostsString("ID", $pearDBndo);
+		$servicestr = $access->getServicesString("ID", $pearDBndo);
+
+	} else
+		exit();
+
+	$normal_mode = 1;
+	(isset($_GET["mode"])) ? $normal_mode = $_GET["mode"] : $normal_mode = 1;
+	(isset($_GET["id"])) ? $url_var = $_GET["id"] : $url_var = 0;
+
+	$type = "root";
+
+
+--------------------
+Filename: getHiddenImage.php
+Message: fix #5895 : security issues
+
+Diff: @@ -51,7 +51,7 @@
+ 	$logos_path = "../../img/media/";
+ 
+ 	if (isset($_GET["id"]) && $_GET["id"] && is_numeric($_GET["id"])) {
+-	    $result = $pearDB->query("SELECT dir_name, img_path FROM view_img_dir, view_img, view_img_dir_relation vidr WHERE view_img_dir.dir_id = vidr.dir_dir_parent_id AND vidr.img_img_id = img_id AND img_id = '".$_GET["id"]."'");
++	    $result = $pearDB->query("SELECT dir_name, img_path FROM view_img_dir, view_img, view_img_dir_relation vidr WHERE view_img_dir.dir_id = vidr.dir_dir_parent_id AND vidr.img_img_id = img_id AND img_id = '".$pearDB->escape($_GET["id"])."'");
+ 	    while ($img = $result->fetchRow() ) {
+ 			$imgpath = $logos_path . $img["dir_name"] ."/". $img["img_path"];
+ 	        if (!is_file($imgpath)) {
+
+Code after:
+	
+	$pearDB = new CentreonDB();
+	CentreonSession::start();
+	$centreon= $_SESSION["centreon"];
+	
+	$session = $pearDB->query("SELECT * FROM `session` WHERE `session_id` = '".session_id()."'");
+	if (!$session->numRows())
+		exit;
+	
+	$logos_path = "../../img/media/";
+
+	if (isset($_GET["id"]) && $_GET["id"] && is_numeric($_GET["id"])) {
+	    $result = $pearDB->query("SELECT dir_name, img_path FROM view_img_dir, view_img, view_img_dir_relation vidr WHERE view_img_dir.dir_id = vidr.dir_dir_parent_id AND vidr.img_img_id = img_id AND img_id = '".$pearDB->escape($_GET["id"])."'");
+	    while ($img = $result->fetchRow() ) {
+			$imgpath = $logos_path . $img["dir_name"] ."/". $img["img_path"];
+	        if (!is_file($imgpath)) {
+		        $imgpath = $centreon_path . 'www/img/media/' . $img["dir_name"] ."/". $img["img_path"];
+		    }
+			if (is_file($imgpath)) {
+			    $fd = fopen($imgpath, "r");
+			    $buffer = NULL;
+			    while (!feof($fd)) {
+				    $buffer .= fgets($fd, 4096);
+			    }
+			    fclose ($fd);
+			    print $buffer;
+			    break;
+
+
+--------------------
+Filename: formHostTemplateModel.php
+Message: fix #5895 : security issues
+
+Diff: @@ -152,7 +152,7 @@
+ 	 */
+ 	$host_tmplt_who_use_me = array();
+ 	if (isset($_GET["host_id"]) && $_GET["host_id"]){
+-		$DBRESULT = $pearDB->query("SELECT host_id, host_name FROM host WHERE host_template_model_htm_id = '".$_GET["host_id"]."'");
++		$DBRESULT = $pearDB->query("SELECT host_id, host_name FROM host WHERE host_template_model_htm_id = '".$pearDB->escape($_GET["host_id"])."'");
+ 		while($host_tmpl_father = $DBRESULT->fetchRow())
+ 			$host_tmplt_who_use_me[$host_tmpl_father["host_id"]] = $host_tmpl_father["host_name"];
+ 		$DBRESULT->free();
+
+Code after:
+        );
+        $cdata->addJsData('clone-count-template', count($tplArray));
+        
+	#
+	## Database retrieve information for differents elements list we need on the page
+	#
+
+	/*
+	 * Get all Templates who use himself
+	 */
+	$host_tmplt_who_use_me = array();
+	if (isset($_GET["host_id"]) && $_GET["host_id"]){
+		$DBRESULT = $pearDB->query("SELECT host_id, host_name FROM host WHERE host_template_model_htm_id = '".$pearDB->escape($_GET["host_id"])."'");
+		while($host_tmpl_father = $DBRESULT->fetchRow())
+			$host_tmplt_who_use_me[$host_tmpl_father["host_id"]] = $host_tmpl_father["host_name"];
+		$DBRESULT->free();
+	}
+
+	/*
+	 * Host Templates comes from DB -> Store in $hTpls Array
+	 */
+	$hTpls = array(NULL=>NULL);
+	$DBRESULT = $pearDB->query("SELECT host_id, host_name, host_template_model_htm_id FROM host WHERE host_register = '0' AND host_id != '".$host_id."' ORDER BY host_name");
+	while($hTpl = $DBRESULT->fetchRow())	{
+		if (!$hTpl["host_name"])
+			$hTpl["host_name"] = getMyHostName($hTpl["host_template_model_htm_id"])."'";
+		if (!isset($host_tmplt_who_use_me[$hTpl["host_id"]]))
+
+
+--------------------
+Filename: additionalRowXml.php
+Message: fix #5895 : security issues
+
+Diff: @@ -52,7 +52,7 @@
+ 	 */
+ 	require_once ($centreon_path . "www/class/centreonSession.class.php");
+ 	require_once ($centreon_path . "www/class/centreon.class.php");
+-	if(!isset($_SESSION['centreon'])) {
++	if (!isset($_SESSION['centreon'])) {
+ 		CentreonSession::start();
+ 	}
+ 
+
+Code after:
+    $nextRowId = htmlentities($_GET['id'], ENT_QUOTES, "UTF-8") + 1;
+    $nbOfInitialRows = htmlentities($_GET['nbOfInitialRows'], ENT_QUOTES, "UTF-8");
+    $currentId = htmlentities($_GET['id'], ENT_QUOTES, "UTF-8");
+
+    include_once("@CENTREON_ETC@/centreon.conf.php");
+	require_once $centreon_path . "/www/class/centreonXML.class.php";
+
+        /*
+	 * Get session
+	 */
+	require_once ($centreon_path . "www/class/centreonSession.class.php");
+	require_once ($centreon_path . "www/class/centreon.class.php");
+	if (!isset($_SESSION['centreon'])) {
+		CentreonSession::start();
+	}
+
+	if (isset($_SESSION['centreon'])) {
+            $oreon = $_SESSION['centreon'];
+	} else {
+            exit;
+	}
+
+	/*
+	 * Get language
+	 */
+	$locale = $oreon->user->get_lang();
+	putenv("LANG=$locale");
+
+
+--------------------
